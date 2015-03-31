@@ -54,8 +54,8 @@ protected:
     ros::Publisher ground_pub_;
     ros::Publisher path_pub_;
     tf::TransformListener tf_listener_;    
-	geometry_msgs::PoseStamped robot_pose_;
-	geometry_msgs::PoseStamped target_pose_;
+    geometry_msgs::PoseStamped robot_pose_;
+    geometry_msgs::PoseStamped target_pose_;
     octomap::OcTree* octree_ptr_;
     pcl::PointCloud<pcl::PointXYZI> ground_pcl_;
     bool treat_unknown_as_free_;
@@ -63,7 +63,7 @@ protected:
 public:
     OctomapPathPlanner();
     ~OctomapPathPlanner();
-	void onOctomap(const octomap_msgs::Octomap::ConstPtr& msg);
+    void onOctomap(const octomap_msgs::Octomap::ConstPtr& msg);
     void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
     void expandOcTree();
     bool isGround(const octomap::OcTreeKey& key);
@@ -94,14 +94,14 @@ OctomapPathPlanner::OctomapPathPlanner()
 
 OctomapPathPlanner::~OctomapPathPlanner()
 {
-	if(octree_ptr_) delete octree_ptr_;
+    if(octree_ptr_) delete octree_ptr_;
 }
 
 
 void OctomapPathPlanner::onOctomap(const octomap_msgs::Octomap::ConstPtr& msg)
 {
-	if(octree_ptr_) delete octree_ptr_;
-	octree_ptr_ = octomap_msgs::binaryMsgToMap(*msg);
+    if(octree_ptr_) delete octree_ptr_;
+    octree_ptr_ = octomap_msgs::binaryMsgToMap(*msg);
 
     expandOcTree();
     computeGround();
@@ -111,24 +111,24 @@ void OctomapPathPlanner::onOctomap(const octomap_msgs::Octomap::ConstPtr& msg)
 
 void OctomapPathPlanner::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
-	try
-	{
+    try
+    {
         geometry_msgs::PoseStamped robot_pose_local;
-		robot_pose_local.header.frame_id = robot_frame_id_;
-		robot_pose_local.pose.position.x = 0.0;
-		robot_pose_local.pose.position.y = 0.0;
-		robot_pose_local.pose.position.z = 0.0;
-		robot_pose_local.pose.orientation.x = 0.0;
-		robot_pose_local.pose.orientation.y = 0.0;
-		robot_pose_local.pose.orientation.z = 0.0;
-		robot_pose_local.pose.orientation.w = 1.0;
-		tf_listener_.transformPose(global_frame_id_, robot_pose_local, robot_pose_);
-		tf_listener_.transformPose(global_frame_id_, *msg, target_pose_);
-	}
-	catch(tf::TransformException& ex)
-	{
-		ROS_ERROR("Failed to lookup robot position: %s", ex.what());
-	}
+        robot_pose_local.header.frame_id = robot_frame_id_;
+        robot_pose_local.pose.position.x = 0.0;
+        robot_pose_local.pose.position.y = 0.0;
+        robot_pose_local.pose.position.z = 0.0;
+        robot_pose_local.pose.orientation.x = 0.0;
+        robot_pose_local.pose.orientation.y = 0.0;
+        robot_pose_local.pose.orientation.z = 0.0;
+        robot_pose_local.pose.orientation.w = 1.0;
+        tf_listener_.transformPose(global_frame_id_, robot_pose_local, robot_pose_);
+        tf_listener_.transformPose(global_frame_id_, *msg, target_pose_);
+    }
+    catch(tf::TransformException& ex)
+    {
+        ROS_ERROR("Failed to lookup robot position: %s", ex.what());
+    }
 
     computeDistanceTransform();
 }
@@ -136,7 +136,7 @@ void OctomapPathPlanner::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
 
 void OctomapPathPlanner::expandOcTree()
 {
-	if(!octree_ptr_) return;
+    if(!octree_ptr_) return;
 
     ROS_INFO("begin expanding octree");
 
@@ -194,7 +194,7 @@ bool OctomapPathPlanner::isGround(const octomap::OcTreeKey& key)
 
 void OctomapPathPlanner::computeGround()
 {
-	if(!octree_ptr_) return;
+    if(!octree_ptr_) return;
 
     ROS_INFO("begin computing ground");
 
