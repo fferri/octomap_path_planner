@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<package>
+  <name>octomap_path_planner</name>
+  <version>0.0.1</version>
+  <description>The octomap_path_planner package</description>
+  <maintainer email="federico.ferri.it@gmail.com">Federico Ferri</maintainer>
+  <license>BSD</license>
+  <author email="federico.ferri.it@gmail.com">Federico Ferri</author>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>octomap_msgs</build_depend>
+  <build_depend>octomap_ros</build_depend>
+  <build_depend>pcl_ros</build_depend>
+  <build_depend>roscpp</build_depend>
+  <run_depend>sensor_msgs</run_depend>
+  <run_depend>geometry_msgs</run_depend>
+  <run_depend>octomap_msgs</run_depend>
+  <run_depend>octomap_ros</run_depend>
+  <run_depend>pcl_ros</run_depend>
+  <run_depend>roscpp</run_depend>
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+  </export>
+</package>
