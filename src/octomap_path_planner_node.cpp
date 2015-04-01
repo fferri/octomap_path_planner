@@ -89,6 +89,7 @@ OctomapPathPlanner::OctomapPathPlanner()
     goal_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
     path_pub_ = nh_.advertise<nav_msgs::Path>("path_out", 1, true);
+    ground_pcl_.header.frame_id = global_frame_id_;
 }
 
 
@@ -124,6 +125,7 @@ void OctomapPathPlanner::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
         robot_pose_local.pose.orientation.w = 1.0;
         tf_listener_.transformPose(global_frame_id_, robot_pose_local, robot_pose_);
         tf_listener_.transformPose(global_frame_id_, *msg, target_pose_);
+        ROS_INFO("goal set to position (%f, %f, %f)", target_pose_.pose.position.x, target_pose_.pose.position.y, target_pose_.pose.position.z);
     }
     catch(tf::TransformException& ex)
     {
@@ -138,7 +140,7 @@ void OctomapPathPlanner::expandOcTree()
 {
     if(!octree_ptr_) return;
 
-    ROS_INFO("begin expanding octree");
+    ROS_INFO("begin expanding octree (octree size = %ld)", octree_ptr_->size());
 
     unsigned int maxDepth = octree_ptr_->getTreeDepth();
 
@@ -230,7 +232,13 @@ void OctomapPathPlanner::publishGroundCloud()
 
 void OctomapPathPlanner::computeDistanceTransform()
 {
-    ROS_INFO("begin computing distance transform");
+    if(ground_pcl_.size() == 0)
+    {
+        ROS_INFO("skip computing distance transform because ground_pcl_ is empty");
+        return;
+    }
+
+    ROS_INFO("begin computing distance transform (ground pcl size = %ld)", ground_pcl_.size());
 
     // make octree for fast search in ground pcl:
     double res = octree_ptr_->getResolution();
@@ -289,14 +297,19 @@ void OctomapPathPlanner::computeDistanceTransform()
     float imax = -std::numeric_limits<float>::infinity();
     for(pcl::PointCloud<pcl::PointXYZI>::iterator it = ground_pcl_.begin(); it != ground_pcl_.end(); ++it)
     {
+        if(!isfinite(it->intensity)) continue;
         imin = fmin(imin, it->intensity);
         imax = fmax(imax, it->intensity);
     }
     ROS_INFO("intensity bounds before normalization: <%f, %f>", imin, imax);
-    float d = imax - imin;
+    const float eps = 0.01;
+    float d = imax - imin + eps;
     for(pcl::PointCloud<pcl::PointXYZI>::iterator it = ground_pcl_.begin(); it != ground_pcl_.end(); ++it)
     {
-        it->intensity = (it->intensity - imin) / d;
+        if(isfinite(it->intensity))
+            it->intensity = (it->intensity - imin) / d;
+        else
+            it->intensity = 1.0;
     }
 
     publishGroundCloud();
