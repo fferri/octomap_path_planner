@@ -54,14 +54,19 @@ protected:
     ros::Publisher ground_pub_;
     ros::Publisher obstacles_pub_;
     ros::Publisher path_pub_;
+    ros::Publisher twist_pub_;
     tf::TransformListener tf_listener_;    
     geometry_msgs::PoseStamped robot_pose_;
     geometry_msgs::PoseStamped target_pose_;
     octomap::OcTree* octree_ptr_;
     pcl::PointCloud<pcl::PointXYZI> ground_pcl_;
     pcl::PointCloud<pcl::PointXYZ> obstacles_pcl_;
+    ros::Timer controller_timer_;
     bool treat_unknown_as_free_;
     double robot_height_;
+    double goal_reached_threshold_;
+    double controller_frequency_;
+    double local_target_radius_;
 public:
     OctomapPathPlanner();
     ~OctomapPathPlanner();
@@ -72,6 +77,12 @@ public:
     void computeGround();
     void publishGroundCloud();
     void computeDistanceTransform();
+    bool getRobotPose();
+    bool goalReached();
+    int generateTarget();
+    bool generateLocalTarget(geometry_msgs::PointStamped& p_local);
+    void generateTwistCommand(const geometry_msgs::PointStamped& local_target, geometry_msgs::Twist& twist);
+    void controllerCallback(const ros::TimerEvent& event);
 };
 
 
@@ -81,17 +92,24 @@ OctomapPathPlanner::OctomapPathPlanner()
       robot_frame_id_("/base_link"),
       octree_ptr_(0L),
       treat_unknown_as_free_(false),
-      robot_height_(0.5)
+      robot_height_(0.5),
+      goal_reached_threshold_(0.2),
+      controller_frequency_(2.0),
+      local_target_radius_(0.4)
 {
     pnh_.param("global_frame_id", global_frame_id_, global_frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
     pnh_.param("treat_unknown_as_free", treat_unknown_as_free_, treat_unknown_as_free_);
     pnh_.param("robot_height", robot_height_, robot_height_);
+    pnh_.param("goal_reached_threshold", goal_reached_threshold_, goal_reached_threshold_);
+    pnh_.param("controller_frequency", controller_frequency_, controller_frequency_);
+    pnh_.param("local_target_radius", local_target_radius_, local_target_radius_);
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &OctomapPathPlanner::onOctomap, this);
     goal_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_cloud_out", 1, true);
     path_pub_ = nh_.advertise<nav_msgs::Path>("path_out", 1, true);
+    twist_pub_ = nh_.advertise<geometry_msgs::Twist>("twist_out", 1, false);
     ground_pcl_.header.frame_id = global_frame_id_;
     obstacles_pcl_.header.frame_id = global_frame_id_;
 }
@@ -118,18 +136,10 @@ void OctomapPathPlanner::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
 {
     try
     {
-        geometry_msgs::PoseStamped robot_pose_local;
-        robot_pose_local.header.frame_id = robot_frame_id_;
-        robot_pose_local.pose.position.x = 0.0;
-        robot_pose_local.pose.position.y = 0.0;
-        robot_pose_local.pose.position.z = 0.0;
-        robot_pose_local.pose.orientation.x = 0.0;
-        robot_pose_local.pose.orientation.y = 0.0;
-        robot_pose_local.pose.orientation.z = 0.0;
-        robot_pose_local.pose.orientation.w = 1.0;
-        tf_listener_.transformPose(global_frame_id_, robot_pose_local, robot_pose_);
         tf_listener_.transformPose(global_frame_id_, *msg, target_pose_);
         ROS_INFO("goal set to position (%f, %f, %f)", target_pose_.pose.position.x, target_pose_.pose.position.y, target_pose_.pose.position.z);
+
+        controller_timer_ = nh_.createTimer(ros::Duration(1.0 / controller_frequency_), &OctomapPathPlanner::controllerCallback, this);
     }
     catch(tf::TransformException& ex)
     {
@@ -337,6 +347,177 @@ void OctomapPathPlanner::computeDistanceTransform()
     publishGroundCloud();
 
     ROS_INFO("finished computing distance transform");
+}
+
+
+bool OctomapPathPlanner::getRobotPose()
+{
+    try
+    {
+        geometry_msgs::PoseStamped robot_pose_local;
+        robot_pose_local.header.frame_id = robot_frame_id_;
+        robot_pose_local.pose.position.x = 0.0;
+        robot_pose_local.pose.position.y = 0.0;
+        robot_pose_local.pose.position.z = 0.0;
+        robot_pose_local.pose.orientation.x = 0.0;
+        robot_pose_local.pose.orientation.y = 0.0;
+        robot_pose_local.pose.orientation.z = 0.0;
+        robot_pose_local.pose.orientation.w = 1.0;
+        tf_listener_.transformPose(global_frame_id_, robot_pose_local, robot_pose_);
+        return true;
+    }
+    catch(tf::TransformException& ex)
+    {
+        ROS_ERROR("Failed to lookup robot position: %s", ex.what());
+    }
+}
+
+
+bool OctomapPathPlanner::goalReached()
+{
+    double dist = sqrt(
+            pow(robot_pose_.pose.position.x - target_pose_.pose.position.x, 2) +
+            pow(robot_pose_.pose.position.y - target_pose_.pose.position.y, 2) +
+            pow(robot_pose_.pose.position.z - target_pose_.pose.position.z, 2)
+    );
+
+    return dist <= goal_reached_threshold_;
+}
+
+
+int OctomapPathPlanner::generateTarget()
+{
+    // TODO: create kdtree when generating ground pcl?
+
+    int best_index = -1;
+    float best_value = std::numeric_limits<float>::infinity();
+
+    for(int i = 0; i < ground_pcl_.size(); i++)
+    {
+        float d = sqrt(
+                pow(robot_pose_.pose.position.x - ground_pcl_[i].x, 2) +
+                pow(robot_pose_.pose.position.y - ground_pcl_[i].y, 2) +
+                pow(robot_pose_.pose.position.z - ground_pcl_[i].z, 2)
+        );
+
+        if(d > local_target_radius_) continue;
+
+        if(best_index == -1 || ground_pcl_[i].intensity < best_value)
+        {
+            best_value = ground_pcl_[i].intensity;
+            best_index = i;
+        }
+    }
+
+    return best_index;
+}
+
+
+bool OctomapPathPlanner::generateLocalTarget(geometry_msgs::PointStamped& p_local)
+{
+    int i = generateTarget();
+
+    if(i == -1)
+    {
+        ROS_ERROR("Failed to find a target in robot vicinity");
+        return false;
+    }
+
+    try
+    {
+        geometry_msgs::PointStamped p;
+        p.header.frame_id = ground_pcl_.header.frame_id;
+        p.point.x = ground_pcl_[i].x;
+        p.point.y = ground_pcl_[i].y;
+        p.point.z = ground_pcl_[i].z;
+        tf_listener_.transformPoint(robot_frame_id_, p, p_local);
+        return true;
+    }
+    catch(tf::TransformException& ex)
+    {
+        ROS_ERROR("Failed to transform reference point: %s", ex.what());
+        return false;
+    }
+}
+
+
+void OctomapPathPlanner::generateTwistCommand(const geometry_msgs::PointStamped& local_target, geometry_msgs::Twist& twist)
+{
+    if(local_target.header.frame_id != robot_frame_id_)
+    {
+        ROS_ERROR("generateTwistCommand: local_target must be in frame '%s'", robot_frame_id_.c_str());
+        return;
+    }
+
+    twist.linear.x = 0.0;
+    twist.linear.y = 0.0;
+    twist.linear.z = 0.0;
+    twist.angular.x = 0.0;
+    twist.angular.y = 0.0;
+    twist.angular.z = 0.0;
+
+    const float k = 1.0;
+    const float linear_gain = k / controller_frequency_;
+    const float angular_gain = k / controller_frequency_;
+
+    const geometry_msgs::Point& p = local_target.point;
+
+    if(p.x < 0)
+    {
+        // turn in place
+        twist.angular.z = 1.0;
+    }
+    else
+    {
+        // make arc
+        double center_y = (pow(p.x, 2) + pow(p.y, 2)) / (2 * p.y);
+        double theta = fabs(atan2(p.x, fabs(center_y) - fabs(p.y)));
+        double arc_length = fabs(center_y * theta);
+
+        twist.linear.x = linear_gain * arc_length;
+        twist.angular.z = angular_gain * (p.y >= 0 ? 1 : -1) * theta;
+    }
+}
+
+
+void OctomapPathPlanner::controllerCallback(const ros::TimerEvent& event)
+{
+    ROS_INFO("controller callback!");
+
+    if(!getRobotPose())
+    {
+        ROS_ERROR("controllerCallback: failed to get robot pose");
+        return;
+    }
+
+    if(goalReached())
+    {
+        ROS_INFO("goal reached! stopping controller timer");
+        controller_timer_.stop();
+        geometry_msgs::Twist twist;
+        twist.linear.x = 0.0;
+        twist.linear.y = 0.0;
+        twist.linear.z = 0.0;
+        twist.angular.x = 0.0;
+        twist.angular.y = 0.0;
+        twist.angular.z = 0.0;
+        twist_pub_.publish(twist);
+        return;
+    }
+
+    geometry_msgs::PointStamped local_target;
+
+    if(!generateLocalTarget(local_target))
+    {
+        ROS_ERROR("controllerCallback: failed to generate a local target to follow");
+        return;
+    }
+
+    geometry_msgs::Twist twist;
+
+    generateTwistCommand(local_target, twist);
+
+    twist_pub_.publish(twist);
 }
 
 
