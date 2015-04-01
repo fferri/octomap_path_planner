@@ -52,12 +52,14 @@ protected:
     ros::Subscriber octree_sub_;
     ros::Subscriber goal_sub_;
     ros::Publisher ground_pub_;
+    ros::Publisher obstacles_pub_;
     ros::Publisher path_pub_;
     tf::TransformListener tf_listener_;    
     geometry_msgs::PoseStamped robot_pose_;
     geometry_msgs::PoseStamped target_pose_;
     octomap::OcTree* octree_ptr_;
     pcl::PointCloud<pcl::PointXYZI> ground_pcl_;
+    pcl::PointCloud<pcl::PointXYZ> obstacles_pcl_;
     bool treat_unknown_as_free_;
     double robot_height_;
 public:
@@ -84,12 +86,14 @@ OctomapPathPlanner::OctomapPathPlanner()
     pnh_.param("global_frame_id", global_frame_id_, global_frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
     pnh_.param("treat_unknown_as_free", treat_unknown_as_free_, treat_unknown_as_free_);
-    pnh_.param("robot_height_", robot_height_, robot_height_);
+    pnh_.param("robot_height", robot_height_, robot_height_);
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &OctomapPathPlanner::onOctomap, this);
     goal_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
+    obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_cloud_out", 1, true);
     path_pub_ = nh_.advertise<nav_msgs::Path>("path_out", 1, true);
     ground_pcl_.header.frame_id = global_frame_id_;
+    obstacles_pcl_.header.frame_id = global_frame_id_;
 }
 
 
@@ -201,9 +205,12 @@ void OctomapPathPlanner::computeGround()
     ROS_INFO("begin computing ground");
 
     ground_pcl_.clear();
+    obstacles_pcl_.clear();
 
     for(octomap::OcTree::leaf_iterator it = octree_ptr_->begin(); it != octree_ptr_->end(); ++it)
     {
+        if(!octree_ptr_->isNodeOccupied(*it)) continue;
+
         if(isGround(it.getKey()))
         {
             pcl::PointXYZI point;
@@ -212,6 +219,14 @@ void OctomapPathPlanner::computeGround()
             point.z = it.getZ();
             point.intensity = std::numeric_limits<float>::infinity();
             ground_pcl_.push_back(point);
+        }
+        else
+        {
+            pcl::PointXYZ point;
+            point.x = it.getX();
+            point.y = it.getY();
+            point.z = it.getZ();
+            obstacles_pcl_.push_back(point);
         }
     }
 
@@ -226,6 +241,13 @@ void OctomapPathPlanner::publishGroundCloud()
         sensor_msgs::PointCloud2 msg;
         pcl::toROSMsg(ground_pcl_, msg);
         ground_pub_.publish(msg);
+    }
+
+    if(obstacles_pub_.getNumSubscribers() > 0)
+    {
+        sensor_msgs::PointCloud2 msg;
+        pcl::toROSMsg(obstacles_pcl_, msg);
+        obstacles_pub_.publish(msg);
     }
 }
 
