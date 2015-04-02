@@ -47,7 +47,7 @@ class OctomapPathPlanner
 protected:
     ros::NodeHandle nh_;
     ros::NodeHandle pnh_;
-    std::string global_frame_id_;
+    std::string frame_id_;
     std::string robot_frame_id_;
     ros::Subscriber octree_sub_;
     ros::Subscriber goal_sub_;
@@ -94,7 +94,7 @@ public:
 
 OctomapPathPlanner::OctomapPathPlanner()
     : pnh_("~"),
-      global_frame_id_("/map"),
+      frame_id_("/map"),
       robot_frame_id_("/base_link"),
       octree_ptr_(0L),
       treat_unknown_as_free_(false),
@@ -106,7 +106,7 @@ OctomapPathPlanner::OctomapPathPlanner()
       twist_linear_gain_(0.5),
       twist_angular_gain_(1.0)
 {
-    pnh_.param("global_frame_id", global_frame_id_, global_frame_id_);
+    pnh_.param("frame_id", frame_id_, frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
     pnh_.param("treat_unknown_as_free", treat_unknown_as_free_, treat_unknown_as_free_);
     pnh_.param("robot_height", robot_height_, robot_height_);
@@ -123,8 +123,8 @@ OctomapPathPlanner::OctomapPathPlanner()
     path_pub_ = nh_.advertise<nav_msgs::Path>("path_out", 1, true);
     twist_pub_ = nh_.advertise<geometry_msgs::Twist>("twist_out", 1, false);
     target_pub_ = nh_.advertise<geometry_msgs::PointStamped>("target_out", 1, false);
-    ground_pcl_.header.frame_id = global_frame_id_;
-    obstacles_pcl_.header.frame_id = global_frame_id_;
+    ground_pcl_.header.frame_id = frame_id_;
+    obstacles_pcl_.header.frame_id = frame_id_;
 }
 
 
@@ -149,7 +149,7 @@ void OctomapPathPlanner::onGoal(const geometry_msgs::PointStamped::ConstPtr& msg
 {
     try
     {
-        tf_listener_.transformPoint(global_frame_id_, *msg, goal_);
+        tf_listener_.transformPoint(frame_id_, *msg, goal_);
         ROS_INFO("goal set to position (%f, %f, %f)", goal_.point.x, goal_.point.y, goal_.point.z);
 
         controller_timer_ = nh_.createTimer(ros::Duration(1.0 / controller_frequency_), &OctomapPathPlanner::controllerCallback, this);
@@ -381,7 +381,7 @@ bool OctomapPathPlanner::getRobotPose()
         robot_pose_local.pose.orientation.y = 0.0;
         robot_pose_local.pose.orientation.z = 0.0;
         robot_pose_local.pose.orientation.w = 1.0;
-        tf_listener_.transformPose(global_frame_id_, robot_pose_local, robot_pose_);
+        tf_listener_.transformPose(frame_id_, robot_pose_local, robot_pose_);
         return true;
     }
     catch(tf::TransformException& ex)
