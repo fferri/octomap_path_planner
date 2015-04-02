@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="global_frame" value="map" />
+    <arg name="laser_frame" value="fast3DLaserScanner_sensor" />
+    <arg name="pointcloud_topic" value="/pcl" />
+    <arg name="resolution" value="0.05" />
+
+    <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
+        <remap from="cloud_in" to="$(arg pointcloud_topic)"/>
+        <param name="frame_id" value="$(arg global_frame)" />
+        <param name="resolution" value="$(arg resolution)" />
+        <param name="sensor_model/hit" type="double" value="0.7" />
+        <param name="sensor_model/miss" type="double" value="0.4" />
+        <param name="sensor_model/min" type="double" value="0.12" />
+        <param name="sensor_model/max" type="double" value="0.97" />
+        <param name="sensor_model/max_range" type="double" value="3.0" />
+    </node>
+</launch>
