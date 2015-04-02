@@ -58,7 +58,7 @@ protected:
     ros::Publisher target_pub_;
     tf::TransformListener tf_listener_;    
     geometry_msgs::PoseStamped robot_pose_;
-    geometry_msgs::PoseStamped target_pose_;
+    geometry_msgs::PointStamped goal_;
     octomap::OcTree* octree_ptr_;
     pcl::PointCloud<pcl::PointXYZI> ground_pcl_;
     pcl::PointCloud<pcl::PointXYZ> obstacles_pcl_;
@@ -77,7 +77,7 @@ public:
     OctomapPathPlanner();
     ~OctomapPathPlanner();
     void onOctomap(const octomap_msgs::Octomap::ConstPtr& msg);
-    void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
+    void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
     void expandOcTree();
     bool isGround(const octomap::OcTreeKey& key);
     void computeGround();
@@ -117,7 +117,7 @@ OctomapPathPlanner::OctomapPathPlanner()
     pnh_.param("twist_linear_gain", twist_linear_gain_, twist_linear_gain_);
     pnh_.param("twist_angular_gain", twist_angular_gain_, twist_angular_gain_);
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &OctomapPathPlanner::onOctomap, this);
-    goal_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
+    goal_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_cloud_out", 1, true);
     path_pub_ = nh_.advertise<nav_msgs::Path>("path_out", 1, true);
@@ -145,12 +145,12 @@ void OctomapPathPlanner::onOctomap(const octomap_msgs::Octomap::ConstPtr& msg)
 }
 
 
-void OctomapPathPlanner::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
+void OctomapPathPlanner::onGoal(const geometry_msgs::PointStamped::ConstPtr& msg)
 {
     try
     {
-        tf_listener_.transformPose(global_frame_id_, *msg, target_pose_);
-        ROS_INFO("goal set to position (%f, %f, %f)", target_pose_.pose.position.x, target_pose_.pose.position.y, target_pose_.pose.position.z);
+        tf_listener_.transformPoint(global_frame_id_, *msg, goal_);
+        ROS_INFO("goal set to position (%f, %f, %f)", goal_.point.x, goal_.point.y, goal_.point.z);
 
         controller_timer_ = nh_.createTimer(ros::Duration(1.0 / controller_frequency_), &OctomapPathPlanner::controllerCallback, this);
     }
@@ -299,9 +299,9 @@ void OctomapPathPlanner::computeDistanceTransform()
     std::vector<int> pointIdx;
     std::vector<float> pointDistSq;
     pcl::PointXYZI goal;
-    goal.x = target_pose_.pose.position.x;
-    goal.y = target_pose_.pose.position.y;
-    goal.z = target_pose_.pose.position.z;
+    goal.x = goal_.point.x;
+    goal.y = goal_.point.y;
+    goal.z = goal_.point.z;
     if(ground_octree_ptr_->nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
     {
         ROS_ERROR("unable to find goal in ground pcl");
@@ -394,9 +394,9 @@ bool OctomapPathPlanner::getRobotPose()
 bool OctomapPathPlanner::goalReached()
 {
     double dist = sqrt(
-            pow(robot_pose_.pose.position.x - target_pose_.pose.position.x, 2) +
-            pow(robot_pose_.pose.position.y - target_pose_.pose.position.y, 2) +
-            pow(robot_pose_.pose.position.z - target_pose_.pose.position.z, 2)
+            pow(robot_pose_.pose.position.x - goal_.point.x, 2) +
+            pow(robot_pose_.pose.position.y - goal_.point.y, 2) +
+            pow(robot_pose_.pose.position.z - goal_.point.z, 2)
     );
 
     return dist <= goal_reached_threshold_;
