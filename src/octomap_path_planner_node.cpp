@@ -70,6 +70,8 @@ protected:
     double goal_reached_threshold_;
     double controller_frequency_;
     double local_target_radius_;
+    double twist_linear_gain_;
+    double twist_angular_gain_;
 public:
     OctomapPathPlanner();
     ~OctomapPathPlanner();
@@ -99,7 +101,9 @@ OctomapPathPlanner::OctomapPathPlanner()
       robot_radius_(0.5),
       goal_reached_threshold_(0.2),
       controller_frequency_(2.0),
-      local_target_radius_(0.4)
+      local_target_radius_(0.4),
+      twist_linear_gain_(3.0),
+      twist_angular_gain_(6.0)
 {
     pnh_.param("global_frame_id", global_frame_id_, global_frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
@@ -109,6 +113,8 @@ OctomapPathPlanner::OctomapPathPlanner()
     pnh_.param("goal_reached_threshold", goal_reached_threshold_, goal_reached_threshold_);
     pnh_.param("controller_frequency", controller_frequency_, controller_frequency_);
     pnh_.param("local_target_radius", local_target_radius_, local_target_radius_);
+    pnh_.param("twist_linear_gain", twist_linear_gain_, twist_linear_gain_);
+    pnh_.param("twist_angular_gain", twist_angular_gain_, twist_angular_gain_);
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &OctomapPathPlanner::onOctomap, this);
     goal_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
@@ -474,10 +480,6 @@ void OctomapPathPlanner::generateTwistCommand(const geometry_msgs::PointStamped&
     twist.angular.y = 0.0;
     twist.angular.z = 0.0;
 
-    const float k = 1.0;
-    const float linear_gain = k / controller_frequency_;
-    const float angular_gain = k / controller_frequency_;
-
     const geometry_msgs::Point& p = local_target.point;
 
     if(p.x < 0)
@@ -492,8 +494,8 @@ void OctomapPathPlanner::generateTwistCommand(const geometry_msgs::PointStamped&
         double theta = fabs(atan2(p.x, fabs(center_y) - fabs(p.y)));
         double arc_length = fabs(center_y * theta);
 
-        twist.linear.x = linear_gain * arc_length;
-        twist.angular.z = angular_gain * (p.y >= 0 ? 1 : -1) * theta;
+        twist.linear.x = twist_linear_gain_ * arc_length;
+        twist.angular.z = twist_angular_gain_ * (p.y >= 0 ? 1 : -1) * theta;
     }
 }
 
