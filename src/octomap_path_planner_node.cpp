@@ -55,6 +55,7 @@ protected:
     ros::Publisher obstacles_pub_;
     ros::Publisher path_pub_;
     ros::Publisher twist_pub_;
+    ros::Publisher target_pub_;
     tf::TransformListener tf_listener_;    
     geometry_msgs::PoseStamped robot_pose_;
     geometry_msgs::PoseStamped target_pose_;
@@ -102,8 +103,8 @@ OctomapPathPlanner::OctomapPathPlanner()
       goal_reached_threshold_(0.2),
       controller_frequency_(2.0),
       local_target_radius_(0.4),
-      twist_linear_gain_(3.0),
-      twist_angular_gain_(6.0)
+      twist_linear_gain_(0.5),
+      twist_angular_gain_(1.0)
 {
     pnh_.param("global_frame_id", global_frame_id_, global_frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
@@ -121,6 +122,7 @@ OctomapPathPlanner::OctomapPathPlanner()
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_cloud_out", 1, true);
     path_pub_ = nh_.advertise<nav_msgs::Path>("path_out", 1, true);
     twist_pub_ = nh_.advertise<geometry_msgs::Twist>("twist_out", 1, false);
+    target_pub_ = nh_.advertise<geometry_msgs::PointStamped>("target_out", 1, false);
     ground_pcl_.header.frame_id = global_frame_id_;
     obstacles_pcl_.header.frame_id = global_frame_id_;
 }
@@ -455,6 +457,7 @@ bool OctomapPathPlanner::generateLocalTarget(geometry_msgs::PointStamped& p_loca
         p.point.y = ground_pcl_[i].y;
         p.point.z = ground_pcl_[i].z;
         tf_listener_.transformPoint(robot_frame_id_, p, p_local);
+        target_pub_.publish(p);
         return true;
     }
     catch(tf::TransformException& ex)
@@ -485,7 +488,7 @@ void OctomapPathPlanner::generateTwistCommand(const geometry_msgs::PointStamped&
     if(p.x < 0)
     {
         // turn in place
-        twist.angular.z = 1.0;
+        twist.angular.z = 1.0 * twist_angular_gain_;
     }
     else
     {
