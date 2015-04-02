@@ -61,9 +61,12 @@ protected:
     octomap::OcTree* octree_ptr_;
     pcl::PointCloud<pcl::PointXYZI> ground_pcl_;
     pcl::PointCloud<pcl::PointXYZ> obstacles_pcl_;
+    pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>::Ptr ground_octree_ptr_;
+    pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>::Ptr obstacles_octree_ptr_;
     ros::Timer controller_timer_;
     bool treat_unknown_as_free_;
     double robot_height_;
+    double robot_radius_;
     double goal_reached_threshold_;
     double controller_frequency_;
     double local_target_radius_;
@@ -93,6 +96,7 @@ OctomapPathPlanner::OctomapPathPlanner()
       octree_ptr_(0L),
       treat_unknown_as_free_(false),
       robot_height_(0.5),
+      robot_radius_(0.5),
       goal_reached_threshold_(0.2),
       controller_frequency_(2.0),
       local_target_radius_(0.4)
@@ -101,6 +105,7 @@ OctomapPathPlanner::OctomapPathPlanner()
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
     pnh_.param("treat_unknown_as_free", treat_unknown_as_free_, treat_unknown_as_free_);
     pnh_.param("robot_height", robot_height_, robot_height_);
+    pnh_.param("robot_radius", robot_radius_, robot_radius_);
     pnh_.param("goal_reached_threshold", goal_reached_threshold_, goal_reached_threshold_);
     pnh_.param("controller_frequency", controller_frequency_, controller_frequency_);
     pnh_.param("local_target_radius", local_target_radius_, local_target_radius_);
@@ -240,6 +245,16 @@ void OctomapPathPlanner::computeGround()
         }
     }
 
+    double res = octree_ptr_->getResolution();
+
+    ground_octree_ptr_ = pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>::Ptr(new pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>(res));
+    ground_octree_ptr_->setInputCloud(ground_pcl_.makeShared());
+    ground_octree_ptr_->addPointsFromInputCloud();
+
+    obstacles_octree_ptr_ = pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>::Ptr(new pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>(res));
+    obstacles_octree_ptr_->setInputCloud(obstacles_pcl_.makeShared());
+    obstacles_octree_ptr_->addPointsFromInputCloud();
+
     ROS_INFO("finished computing ground");
 }
 
@@ -272,12 +287,6 @@ void OctomapPathPlanner::computeDistanceTransform()
 
     ROS_INFO("begin computing distance transform (ground pcl size = %ld)", ground_pcl_.size());
 
-    // make octree for fast search in ground pcl:
-    double res = octree_ptr_->getResolution();
-    pcl::octree::OctreePointCloudSearch<pcl::PointXYZI> pcl_octree(res);
-    pcl_octree.setInputCloud(ground_pcl_.makeShared());
-    pcl_octree.addPointsFromInputCloud();
-
     // find goal index in ground pcl:
     std::vector<int> pointIdx;
     std::vector<float> pointDistSq;
@@ -285,12 +294,13 @@ void OctomapPathPlanner::computeDistanceTransform()
     goal.x = target_pose_.pose.position.x;
     goal.y = target_pose_.pose.position.y;
     goal.z = target_pose_.pose.position.z;
-    if(pcl_octree.nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
+    if(ground_octree_ptr_->nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
     {
         ROS_ERROR("unable to find goal in ground pcl");
         return;
     }
 
+    double res = octree_ptr_->getResolution();
     int goal_idx = pointIdx[0];
 
     // distance to goal is zero (stored in the intensity channel):
@@ -306,7 +316,7 @@ void OctomapPathPlanner::computeDistanceTransform()
         // get neighbours:
         std::vector<int> pointIdx;
         std::vector<float> pointDistSq;
-        pcl_octree.radiusSearch(ground_pcl_[i], 1.8 * res, pointIdx, pointDistSq);
+        ground_octree_ptr_->radiusSearch(ground_pcl_[i], 1.8 * res, pointIdx, pointDistSq);
 
         for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); it++)
         {
@@ -387,25 +397,33 @@ bool OctomapPathPlanner::goalReached()
 
 int OctomapPathPlanner::generateTarget()
 {
-    // TODO: create kdtree when generating ground pcl?
-
     int best_index = -1;
     float best_value = std::numeric_limits<float>::infinity();
 
-    for(int i = 0; i < ground_pcl_.size(); i++)
+    pcl::PointXYZI robot_position;
+    robot_position.x = robot_pose_.pose.position.x;
+    robot_position.y = robot_pose_.pose.position.y;
+    robot_position.z = robot_pose_.pose.position.z;
+
+    std::vector<int> pointIdx;
+    std::vector<float> pointDistSq;
+    ground_octree_ptr_->radiusSearch(robot_position, local_target_radius_, pointIdx, pointDistSq);
+
+    for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
     {
-        float d = sqrt(
-                pow(robot_pose_.pose.position.x - ground_pcl_[i].x, 2) +
-                pow(robot_pose_.pose.position.y - ground_pcl_[i].y, 2) +
-                pow(robot_pose_.pose.position.z - ground_pcl_[i].z, 2)
-        );
+        pcl::PointXYZI& p = ground_pcl_[*it];
 
-        if(d > local_target_radius_) continue;
+        std::vector<int> pointIdx2;
+        std::vector<float> pointDistSq2;
+        pcl::PointXYZ p1; p1.x = p.x; p1.y = p.y; p1.z = p.z;
+        bool safe = obstacles_octree_ptr_->nearestKSearch(p1, 1, pointIdx2, pointDistSq2) < 1 || pointDistSq2[0] > (robot_radius_ * robot_radius_);
 
-        if(best_index == -1 || ground_pcl_[i].intensity < best_value)
+        if(!safe) continue;
+
+        if(best_index == -1 || p.intensity < best_value)
         {
-            best_value = ground_pcl_[i].intensity;
-            best_index = i;
+            best_value = p.intensity;
+            best_index = *it;
         }
     }
 
