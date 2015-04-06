@@ -1,15 +1,10 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="global_frame" value="map" />
-    <arg name="laser_frame" value="fast3DLaserScanner_sensor" />
-    <arg name="pointcloud_topic" value="/pcl" />
-    <arg name="resolution" value="0.05" />
-
     <node pkg="octomap_path_planner" type="octomap_path_planner_node" name="octomap_path_planner">
         <remap from="octree_in" to="/octomap_binary"/>
-        <remap from="goal_in" to="/move_base_simple/goal"/>
+        <remap from="goal_in" to="/clicked_point"/>
         <remap from="twist_out" to="/cmd_vel"/>
-        <param name="robot_frame_id" value="/Pioneer_p3dx" />
         <param name="treat_unknown_as_free" type="bool" value="true" />
+        <rosparam command="load" file="$(find octomap_path_planner)/launch/vrep-p3dx.yaml" />
     </node>
 </launch>

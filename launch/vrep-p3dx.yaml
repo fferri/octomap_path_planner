@@ -1,0 +1,3 @@
+frame_id: /map
+laser_frame_id: /fast3DLaserScanner_sensor
+robot_frame_id: /Pioneer_p3dx
