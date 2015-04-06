@@ -485,10 +485,10 @@ void OctomapPathPlanner::generateTwistCommand(const geometry_msgs::PointStamped&
 
     const geometry_msgs::Point& p = local_target.point;
 
-    if(p.x < 0)
+    if(p.x < 0 || fabs(p.y) > p.x)
     {
         // turn in place
-        twist.angular.z = 1.0 * twist_angular_gain_;
+        twist.angular.z = (p.y > 0 ? 1 : -1) * twist_angular_gain_;
     }
     else
     {
