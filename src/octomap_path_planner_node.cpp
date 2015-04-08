@@ -73,6 +73,7 @@ protected:
     double local_target_radius_;
     double twist_linear_gain_;
     double twist_angular_gain_;
+    double max_superable_height_;
 public:
     OctomapPathPlanner();
     ~OctomapPathPlanner();
@@ -80,6 +81,7 @@ public:
     void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
     void expandOcTree();
     bool isGround(const octomap::OcTreeKey& key);
+    bool isObstacle(const octomap::OcTreeKey& key);
     void computeGround();
     void publishGroundCloud();
     void computeDistanceTransform();
@@ -104,7 +106,8 @@ OctomapPathPlanner::OctomapPathPlanner()
       controller_frequency_(2.0),
       local_target_radius_(0.4),
       twist_linear_gain_(0.5),
-      twist_angular_gain_(1.0)
+      twist_angular_gain_(1.0),
+      max_superable_height_(0.2)
 {
     pnh_.param("frame_id", frame_id_, frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
@@ -116,6 +119,7 @@ OctomapPathPlanner::OctomapPathPlanner()
     pnh_.param("local_target_radius", local_target_radius_, local_target_radius_);
     pnh_.param("twist_linear_gain", twist_linear_gain_, twist_linear_gain_);
     pnh_.param("twist_angular_gain", twist_angular_gain_, twist_angular_gain_);
+    pnh_.param("max_superable_height", max_superable_height_, max_superable_height_);
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &OctomapPathPlanner::onOctomap, this);
     goal_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
@@ -221,6 +225,38 @@ bool OctomapPathPlanner::isGround(const octomap::OcTreeKey& key)
 }
 
 
+bool OctomapPathPlanner::isObstacle(const octomap::OcTreeKey& key)
+{
+    octomap::OcTreeNode *node;
+    double res = octree_ptr_->getResolution();
+    int num_voxels = 1;
+
+    // look up...
+    octomap::OcTreeKey key1(key);
+    while(true)
+    {
+        key1[2]++;
+        node = octree_ptr_->search(key1);
+        if(!node) break;
+        if(node && !octree_ptr_->isNodeOccupied(node)) break;
+        num_voxels++;
+    }
+
+    // look down...
+    octomap::OcTreeKey key2(key);
+    while(true)
+    {
+        key2[2]--;
+        node = octree_ptr_->search(key2);
+        if(!node) break;
+        if(node && !octree_ptr_->isNodeOccupied(node)) break;
+        num_voxels++;
+    }
+
+    return res * num_voxels > max_superable_height_;
+}
+
+
 void OctomapPathPlanner::computeGround()
 {
     if(!octree_ptr_) return;
@@ -243,7 +279,7 @@ void OctomapPathPlanner::computeGround()
             point.intensity = std::numeric_limits<float>::infinity();
             ground_pcl_.push_back(point);
         }
-        else
+        else if(isObstacle(it.getKey()))
         {
             pcl::PointXYZ point;
             point.x = it.getX();
@@ -413,29 +449,35 @@ int OctomapPathPlanner::generateTarget()
     robot_position.y = robot_pose_.pose.position.y;
     robot_position.z = robot_pose_.pose.position.z;
 
-    std::vector<int> pointIdx;
-    std::vector<float> pointDistSq;
-    ground_octree_ptr_->radiusSearch(robot_position, local_target_radius_, pointIdx, pointDistSq);
-
-    for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
+    for(int k = 1; k <= 2; k++)
     {
-        pcl::PointXYZI& p = ground_pcl_[*it];
+        std::vector<int> pointIdx;
+        std::vector<float> pointDistSq;
+        ground_octree_ptr_->radiusSearch(robot_position, k * local_target_radius_, pointIdx, pointDistSq);
 
-        std::vector<int> pointIdx2;
-        std::vector<float> pointDistSq2;
-        pcl::PointXYZ p1; p1.x = p.x; p1.y = p.y; p1.z = p.z;
-        bool safe = obstacles_octree_ptr_->nearestKSearch(p1, 1, pointIdx2, pointDistSq2) < 1 || pointDistSq2[0] > (robot_radius_ * robot_radius_);
-
-        if(!safe) continue;
-
-        if(best_index == -1 || p.intensity < best_value)
+        for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
         {
-            best_value = p.intensity;
-            best_index = *it;
+            pcl::PointXYZI& p = ground_pcl_[*it];
+
+            std::vector<int> pointIdx2;
+            std::vector<float> pointDistSq2;
+            pcl::PointXYZ p1; p1.x = p.x; p1.y = p.y; p1.z = p.z;
+            bool safe = obstacles_octree_ptr_->nearestKSearch(p1, 1, pointIdx2, pointDistSq2) < 1 || pointDistSq2[0] > (robot_radius_ * robot_radius_);
+
+            if(!safe) continue;
+
+            if(best_index == -1 || p.intensity < best_value)
+            {
+                best_value = p.intensity;
+                best_index = *it;
+            }
         }
+
+        if(best_index != -1)
+            return best_index;
     }
 
-    return best_index;
+    return -1;
 }
 
 
