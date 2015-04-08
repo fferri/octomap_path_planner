@@ -332,7 +332,7 @@ void OctomapPathPlanner::computeDistanceTransform()
 
             // intensity value are initially set to infinity.
             // if i is finite it means it has already been labeled.
-            if(isfinite(ground_pcl_[j].intensity)) continue;
+            if(std::isfinite(ground_pcl_[j].intensity)) continue;
 
             // otherwise, label it:
             ground_pcl_[j].intensity = ground_pcl_[i].intensity + 1.0;
@@ -347,7 +347,7 @@ void OctomapPathPlanner::computeDistanceTransform()
     float imax = -std::numeric_limits<float>::infinity();
     for(pcl::PointCloud<pcl::PointXYZI>::iterator it = ground_pcl_.begin(); it != ground_pcl_.end(); ++it)
     {
-        if(!isfinite(it->intensity)) continue;
+        if(!std::isfinite(it->intensity)) continue;
         imin = fmin(imin, it->intensity);
         imax = fmax(imax, it->intensity);
     }
@@ -356,7 +356,7 @@ void OctomapPathPlanner::computeDistanceTransform()
     float d = imax - imin + eps;
     for(pcl::PointCloud<pcl::PointXYZI>::iterator it = ground_pcl_.begin(); it != ground_pcl_.end(); ++it)
     {
-        if(isfinite(it->intensity))
+        if(std::isfinite(it->intensity))
             it->intensity = (it->intensity - imin) / d;
         else
             it->intensity = 1.0;
