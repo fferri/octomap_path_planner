@@ -29,3 +29,6 @@
 
 # vim swap files
 .*.swp
+
+# catkin tools
+.catkin_tools
