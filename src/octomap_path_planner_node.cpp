@@ -82,6 +82,8 @@ public:
     void expandOcTree();
     bool isGround(const octomap::OcTreeKey& key);
     bool isObstacle(const octomap::OcTreeKey& key);
+    template<class T> bool isNearObstacle(const T& point);
+    void filterInflatedRegionFromGround();
     void computeGround();
     void publishGroundCloud();
     void computeDistanceTransform();
@@ -257,6 +259,35 @@ bool OctomapPathPlanner::isObstacle(const octomap::OcTreeKey& key)
 }
 
 
+template<class T>
+bool OctomapPathPlanner::isNearObstacle(const T& point)
+{
+    std::vector<int> pointIdx2;
+    std::vector<float> pointDistSq2;
+    pcl::PointXYZ p;
+    p.x = point.x;
+    p.y = point.y;
+    p.z = point.z;
+    bool safe = obstacles_octree_ptr_->nearestKSearch(p, 1, pointIdx2, pointDistSq2) < 1 || pointDistSq2[0] > (robot_radius_ * robot_radius_);
+    return !safe;
+}
+
+
+void OctomapPathPlanner::filterInflatedRegionFromGround()
+{
+    for(int i = 0; i < ground_pcl_.size(); i++)
+    {
+        if(isNearObstacle(ground_pcl_[i]))
+        {
+            std::swap(*(ground_pcl_.begin() + i), ground_pcl_.back());
+            ground_pcl_.points.pop_back();
+            ground_pcl_.width = ground_pcl_.points.size();
+            ground_pcl_.height = 1;
+        }
+    }
+}
+
+
 void OctomapPathPlanner::computeGround()
 {
     if(!octree_ptr_) return;
@@ -291,13 +322,15 @@ void OctomapPathPlanner::computeGround()
 
     double res = octree_ptr_->getResolution();
 
-    ground_octree_ptr_ = pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>::Ptr(new pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>(res));
-    ground_octree_ptr_->setInputCloud(ground_pcl_.makeShared());
-    ground_octree_ptr_->addPointsFromInputCloud();
-
     obstacles_octree_ptr_ = pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>::Ptr(new pcl::octree::OctreePointCloudSearch<pcl::PointXYZ>(res));
     obstacles_octree_ptr_->setInputCloud(obstacles_pcl_.makeShared());
     obstacles_octree_ptr_->addPointsFromInputCloud();
+
+    filterInflatedRegionFromGround();
+
+    ground_octree_ptr_ = pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>::Ptr(new pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>(res));
+    ground_octree_ptr_->setInputCloud(ground_pcl_.makeShared());
+    ground_octree_ptr_->addPointsFromInputCloud();
 
     ROS_INFO("finished computing ground");
 }
@@ -449,35 +482,22 @@ int OctomapPathPlanner::generateTarget()
     robot_position.y = robot_pose_.pose.position.y;
     robot_position.z = robot_pose_.pose.position.z;
 
-    for(int k = 1; k <= 2; k++)
+    std::vector<int> pointIdx;
+    std::vector<float> pointDistSq;
+    ground_octree_ptr_->radiusSearch(robot_position, local_target_radius_, pointIdx, pointDistSq);
+
+    for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
     {
-        std::vector<int> pointIdx;
-        std::vector<float> pointDistSq;
-        ground_octree_ptr_->radiusSearch(robot_position, k * local_target_radius_, pointIdx, pointDistSq);
+        pcl::PointXYZI& p = ground_pcl_[*it];
 
-        for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
+        if(best_index == -1 || p.intensity < best_value)
         {
-            pcl::PointXYZI& p = ground_pcl_[*it];
-
-            std::vector<int> pointIdx2;
-            std::vector<float> pointDistSq2;
-            pcl::PointXYZ p1; p1.x = p.x; p1.y = p.y; p1.z = p.z;
-            bool safe = obstacles_octree_ptr_->nearestKSearch(p1, 1, pointIdx2, pointDistSq2) < 1 || pointDistSq2[0] > (robot_radius_ * robot_radius_);
-
-            if(!safe) continue;
-
-            if(best_index == -1 || p.intensity < best_value)
-            {
-                best_value = p.intensity;
-                best_index = *it;
-            }
+            best_value = p.intensity;
+            best_index = *it;
         }
-
-        if(best_index != -1)
-            return best_index;
     }
 
-    return -1;
+    return best_index;
 }
 
 
