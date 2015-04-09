@@ -548,7 +548,7 @@ double OctomapPathPlanner::orientationError()
             pow(goal_.pose.orientation.y, 2) +
             pow(goal_.pose.orientation.z, 2);
 
-    // if so, we never have position error:
+    // if so, we never have an orientation error:
     if(qnorm < 1e-5) return 0;
 
     // "Robotica - Modellistica Pianificazione e Controllo" eq. 3.88
