@@ -1,9 +1,10 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="robot" default="p3dx" />
-    <node pkg="octomap_path_planner" type="octomap_path_planner_node" name="octomap_path_planner">
+    <node pkg="octomap_path_planner" type="octomap_path_planner_node" name="octomap_path_planner" output="screen">
         <remap from="octree_in" to="/octomap_binary"/>
-        <remap from="goal_in" to="/clicked_point"/>
+        <remap from="goal_point_in" to="/clicked_point"/>
+        <remap from="goal_pose_in" to="/move_base_simple/goal"/>
         <remap from="twist_out" to="/cmd_vel"/>
         <param name="treat_unknown_as_free" type="bool" value="true" />
         <param name="goal_reached_threshold" value="0.25" />
