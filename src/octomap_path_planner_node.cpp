@@ -15,6 +15,7 @@
 #include <boost/random/normal_distribution.hpp>
 
 #include <ros/ros.h>
+#include <std_msgs/Float32.h>
 #include <geometry_msgs/Point.h>
 #include <geometry_msgs/PoseArray.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -50,15 +51,18 @@ protected:
     std::string frame_id_;
     std::string robot_frame_id_;
     ros::Subscriber octree_sub_;
-    ros::Subscriber goal_sub_;
+    ros::Subscriber goal_point_sub_;
+    ros::Subscriber goal_pose_sub_;
     ros::Publisher ground_pub_;
     ros::Publisher obstacles_pub_;
     ros::Publisher path_pub_;
     ros::Publisher twist_pub_;
     ros::Publisher target_pub_;
+    ros::Publisher position_error_pub_;
+    ros::Publisher orientation_error_pub_;
     tf::TransformListener tf_listener_;    
     geometry_msgs::PoseStamped robot_pose_;
-    geometry_msgs::PointStamped goal_;
+    geometry_msgs::PoseStamped goal_;
     octomap::OcTree* octree_ptr_;
     pcl::PointCloud<pcl::PointXYZI> ground_pcl_;
     pcl::PointCloud<pcl::PointXYZ> obstacles_pcl_;
@@ -74,21 +78,26 @@ protected:
     double twist_linear_gain_;
     double twist_angular_gain_;
     double max_superable_height_;
+    void startController();
+    bool reached_position_;
 public:
     OctomapPathPlanner();
     ~OctomapPathPlanner();
     void onOctomap(const octomap_msgs::Octomap::ConstPtr& msg);
     void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
+    void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
     void expandOcTree();
     bool isGround(const octomap::OcTreeKey& key);
     bool isObstacle(const octomap::OcTreeKey& key);
     template<class T> bool isNearObstacle(const T& point);
     void filterInflatedRegionFromGround();
     void computeGround();
+    void projectGoalPositionToGround();
     void publishGroundCloud();
     void computeDistanceTransform();
     bool getRobotPose();
-    bool goalReached();
+    double positionError();
+    double orientationError();
     int generateTarget();
     bool generateLocalTarget(geometry_msgs::PointStamped& p_local);
     void generateTwistCommand(const geometry_msgs::PointStamped& local_target, geometry_msgs::Twist& twist);
@@ -109,7 +118,8 @@ OctomapPathPlanner::OctomapPathPlanner()
       local_target_radius_(0.4),
       twist_linear_gain_(0.5),
       twist_angular_gain_(1.0),
-      max_superable_height_(0.2)
+      max_superable_height_(0.2),
+      reached_position_(false)
 {
     pnh_.param("frame_id", frame_id_, frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
@@ -123,12 +133,15 @@ OctomapPathPlanner::OctomapPathPlanner()
     pnh_.param("twist_angular_gain", twist_angular_gain_, twist_angular_gain_);
     pnh_.param("max_superable_height", max_superable_height_, max_superable_height_);
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &OctomapPathPlanner::onOctomap, this);
-    goal_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("goal_in", 1, &OctomapPathPlanner::onGoal, this);
+    goal_point_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("goal_point_in", 1, &OctomapPathPlanner::onGoal, this);
+    goal_pose_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_pose_in", 1, &OctomapPathPlanner::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_cloud_out", 1, true);
     path_pub_ = nh_.advertise<nav_msgs::Path>("path_out", 1, true);
     twist_pub_ = nh_.advertise<geometry_msgs::Twist>("twist_out", 1, false);
     target_pub_ = nh_.advertise<geometry_msgs::PointStamped>("target_out", 1, false);
+    position_error_pub_ = nh_.advertise<std_msgs::Float32>("position_error", 10, false);;
+    orientation_error_pub_ = nh_.advertise<std_msgs::Float32>("orientation_error", 10, false);;
     ground_pcl_.header.frame_id = frame_id_;
     obstacles_pcl_.header.frame_id = frame_id_;
 }
@@ -151,14 +164,55 @@ void OctomapPathPlanner::onOctomap(const octomap_msgs::Octomap::ConstPtr& msg)
 }
 
 
+void OctomapPathPlanner::startController()
+{
+    controller_timer_ = nh_.createTimer(ros::Duration(1.0 / controller_frequency_), &OctomapPathPlanner::controllerCallback, this);
+    reached_position_ = false;
+}
+
+
 void OctomapPathPlanner::onGoal(const geometry_msgs::PointStamped::ConstPtr& msg)
 {
     try
     {
-        tf_listener_.transformPoint(frame_id_, *msg, goal_);
-        ROS_INFO("goal set to position (%f, %f, %f)", goal_.point.x, goal_.point.y, goal_.point.z);
+        geometry_msgs::PointStamped msg2;
+        tf_listener_.transformPoint(frame_id_, *msg, msg2);
+        goal_.header.stamp = msg2.header.stamp;
+        goal_.header.frame_id = msg2.header.frame_id;
+        goal_.pose.position.x = msg2.point.x;
+        goal_.pose.position.y = msg2.point.y;
+        goal_.pose.position.z = msg2.point.z;
+        goal_.pose.orientation.x = 0.0;
+        goal_.pose.orientation.y = 0.0;
+        goal_.pose.orientation.z = 0.0;
+        goal_.pose.orientation.w = 0.0;
+        projectGoalPositionToGround();
+        ROS_INFO("goal set to point (%f, %f, %f)",
+            goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z);
 
-        controller_timer_ = nh_.createTimer(ros::Duration(1.0 / controller_frequency_), &OctomapPathPlanner::controllerCallback, this);
+        startController();
+    }
+    catch(tf::TransformException& ex)
+    {
+        ROS_ERROR("Failed to lookup robot position: %s", ex.what());
+    }
+
+    computeDistanceTransform();
+}
+
+
+void OctomapPathPlanner::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
+{
+    try
+    {
+        tf_listener_.transformPose(frame_id_, *msg, goal_);
+        projectGoalPositionToGround();
+        ROS_INFO("goal set to pose (%f, %f, %f), (%f, %f, %f, %f)",
+                goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z,
+                goal_.pose.orientation.x, goal_.pose.orientation.y, goal_.pose.orientation.z,
+                goal_.pose.orientation.w);
+
+        startController();
     }
     catch(tf::TransformException& ex)
     {
@@ -173,12 +227,14 @@ void OctomapPathPlanner::expandOcTree()
 {
     if(!octree_ptr_) return;
 
-    ROS_INFO("begin expanding octree (octree size = %ld)", octree_ptr_->size());
-
     unsigned int maxDepth = octree_ptr_->getTreeDepth();
 
     // expand collapsed occupied nodes until all occupied leaves are at maximum depth
     std::vector<octomap::OcTreeNode*> collapsed_occ_nodes;
+
+    size_t initial_size = octree_ptr_->size();
+    size_t num_rounds = 0;
+    size_t expanded_nodes = 0;
 
     do
     {
@@ -194,10 +250,12 @@ void OctomapPathPlanner::expandOcTree()
         {
             (*it)->expandNode();
         }
-        ROS_INFO("expanded %ld nodes in octree", collapsed_occ_nodes.size());
+
+        expanded_nodes += collapsed_occ_nodes.size();
+        num_rounds++;
     } while(collapsed_occ_nodes.size() > 0);
 
-    ROS_INFO("finished expanding octree");
+    //ROS_INFO("received octree of %ld nodes; expanded %ld nodes in %ld rounds.", initial_size, expanded_nodes, num_rounds);
 }
 
 
@@ -268,31 +326,30 @@ bool OctomapPathPlanner::isNearObstacle(const T& point)
     p.x = point.x;
     p.y = point.y;
     p.z = point.z;
-    bool safe = obstacles_octree_ptr_->nearestKSearch(p, 1, pointIdx2, pointDistSq2) < 1 || pointDistSq2[0] > (robot_radius_ * robot_radius_);
-    return !safe;
+    int num_points = obstacles_octree_ptr_->nearestKSearch(p, 1, pointIdx2, pointDistSq2);
+    return num_points >= 1 && pointDistSq2[0] < (robot_radius_ * robot_radius_);
 }
 
 
 void OctomapPathPlanner::filterInflatedRegionFromGround()
 {
-    for(int i = 0; i < ground_pcl_.size(); i++)
+    for(int i = 0; i < ground_pcl_.size(); )
     {
         if(isNearObstacle(ground_pcl_[i]))
         {
             std::swap(*(ground_pcl_.begin() + i), ground_pcl_.back());
             ground_pcl_.points.pop_back();
-            ground_pcl_.width = ground_pcl_.points.size();
-            ground_pcl_.height = 1;
         }
+        else i++;
     }
+    ground_pcl_.width = ground_pcl_.points.size();
+    ground_pcl_.height = 1;
 }
 
 
 void OctomapPathPlanner::computeGround()
 {
     if(!octree_ptr_) return;
-
-    ROS_INFO("begin computing ground");
 
     ground_pcl_.clear();
     obstacles_pcl_.clear();
@@ -331,8 +388,26 @@ void OctomapPathPlanner::computeGround()
     ground_octree_ptr_ = pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>::Ptr(new pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>(res));
     ground_octree_ptr_->setInputCloud(ground_pcl_.makeShared());
     ground_octree_ptr_->addPointsFromInputCloud();
+}
 
-    ROS_INFO("finished computing ground");
+
+void OctomapPathPlanner::projectGoalPositionToGround()
+{
+    pcl::PointXYZI goal;
+    goal.x = goal_.pose.position.x;
+    goal.y = goal_.pose.position.y;
+    goal.z = goal_.pose.position.z;
+    std::vector<int> pointIdx;
+    std::vector<float> pointDistSq;
+    if(ground_octree_ptr_->nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
+    {
+        ROS_ERROR("Failed to project goal position to ground pcl");
+        return;
+    }
+    int i = pointIdx[0];
+    goal_.pose.position.x = ground_pcl_[i].x;
+    goal_.pose.position.y = ground_pcl_[i].y;
+    goal_.pose.position.z = ground_pcl_[i].z;
 }
 
 
@@ -362,15 +437,13 @@ void OctomapPathPlanner::computeDistanceTransform()
         return;
     }
 
-    ROS_INFO("begin computing distance transform (ground pcl size = %ld)", ground_pcl_.size());
-
     // find goal index in ground pcl:
     std::vector<int> pointIdx;
     std::vector<float> pointDistSq;
     pcl::PointXYZI goal;
-    goal.x = goal_.point.x;
-    goal.y = goal_.point.y;
-    goal.z = goal_.point.z;
+    goal.x = goal_.pose.position.x;
+    goal.y = goal_.pose.position.y;
+    goal.z = goal_.pose.position.z;
     if(ground_octree_ptr_->nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
     {
         ROS_ERROR("unable to find goal in ground pcl");
@@ -420,7 +493,6 @@ void OctomapPathPlanner::computeDistanceTransform()
         imin = fmin(imin, it->intensity);
         imax = fmax(imax, it->intensity);
     }
-    ROS_INFO("intensity bounds before normalization: <%f, %f>", imin, imax);
     const float eps = 0.01;
     float d = imax - imin + eps;
     for(pcl::PointCloud<pcl::PointXYZI>::iterator it = ground_pcl_.begin(); it != ground_pcl_.end(); ++it)
@@ -432,8 +504,6 @@ void OctomapPathPlanner::computeDistanceTransform()
     }
 
     publishGroundCloud();
-
-    ROS_INFO("finished computing distance transform");
 }
 
 
@@ -460,15 +530,34 @@ bool OctomapPathPlanner::getRobotPose()
 }
 
 
-bool OctomapPathPlanner::goalReached()
+double OctomapPathPlanner::positionError()
 {
-    double dist = sqrt(
-            pow(robot_pose_.pose.position.x - goal_.point.x, 2) +
-            pow(robot_pose_.pose.position.y - goal_.point.y, 2) +
-            pow(robot_pose_.pose.position.z - goal_.point.z, 2)
+    return sqrt(
+            pow(robot_pose_.pose.position.x - goal_.pose.position.x, 2) +
+            pow(robot_pose_.pose.position.y - goal_.pose.position.y, 2) +
+            pow(robot_pose_.pose.position.z - goal_.pose.position.z, 2)
     );
+}
 
-    return dist <= goal_reached_threshold_;
+
+double OctomapPathPlanner::orientationError()
+{
+    // check if goal is only by position:
+    double qnorm = pow(goal_.pose.orientation.w, 2) +
+            pow(goal_.pose.orientation.x, 2) +
+            pow(goal_.pose.orientation.y, 2) +
+            pow(goal_.pose.orientation.z, 2);
+
+    // if so, we never have position error:
+    if(qnorm < 1e-5) return 0;
+
+    // "Robotica - Modellistica Pianificazione e Controllo" eq. 3.88
+    double nd = goal_.pose.orientation.w,
+            ne = robot_pose_.pose.orientation.w;
+    Eigen::Vector3d ed(goal_.pose.orientation.x, goal_.pose.orientation.y, goal_.pose.orientation.z),
+            ee(robot_pose_.pose.orientation.x, robot_pose_.pose.orientation.y, robot_pose_.pose.orientation.z);
+    Eigen::Vector3d eo = ne * ed - nd * ee - ed.cross(ee);
+    return eo(2);
 }
 
 
@@ -567,40 +656,74 @@ void OctomapPathPlanner::generateTwistCommand(const geometry_msgs::PointStamped&
 
 void OctomapPathPlanner::controllerCallback(const ros::TimerEvent& event)
 {
-    ROS_INFO("controller callback!");
-
     if(!getRobotPose())
     {
         ROS_ERROR("controllerCallback: failed to get robot pose");
         return;
     }
 
-    if(goalReached())
-    {
-        ROS_INFO("goal reached! stopping controller timer");
-        controller_timer_.stop();
-        geometry_msgs::Twist twist;
-        twist.linear.x = 0.0;
-        twist.linear.y = 0.0;
-        twist.linear.z = 0.0;
-        twist.angular.x = 0.0;
-        twist.angular.y = 0.0;
-        twist.angular.z = 0.0;
-        twist_pub_.publish(twist);
-        return;
-    }
-
-    geometry_msgs::PointStamped local_target;
-
-    if(!generateLocalTarget(local_target))
-    {
-        ROS_ERROR("controllerCallback: failed to generate a local target to follow");
-        return;
-    }
-
     geometry_msgs::Twist twist;
+    twist.linear.x = 0.0;
+    twist.linear.y = 0.0;
+    twist.linear.z = 0.0;
+    twist.angular.x = 0.0;
+    twist.angular.y = 0.0;
+    twist.angular.z = 0.0;
 
-    generateTwistCommand(local_target, twist);
+    std_msgs::Float32 ep, eo;
+
+    ep.data = positionError();
+    position_error_pub_.publish(ep);
+
+    eo.data = orientationError();
+    orientation_error_pub_.publish(eo);
+
+    const char *status_str;
+
+    if((!reached_position_ && ep.data > goal_reached_threshold_)
+        || (reached_position_ && ep.data > 2 * goal_reached_threshold_))
+    {
+        // regulate position
+
+        status_str = "REGULATING POSITION";
+
+        reached_position_ = false;
+
+        geometry_msgs::PointStamped local_target;
+
+        if(!generateLocalTarget(local_target))
+        {
+            ROS_ERROR("controllerCallback: failed to generate a local target to follow");
+            return;
+        }
+
+        generateTwistCommand(local_target, twist);
+    }
+    else
+    {
+        reached_position_ = true;
+
+        if(fabs(eo.data) > 0.02)
+        {
+            // regulate orientation
+
+            status_str = "REGULATING ORIENTATION";
+
+            twist.angular.z = twist_angular_gain_ * eo.data;
+        }
+        else
+        {
+            // goal reached
+
+            status_str = "REACHED GOAL";
+
+            ROS_INFO("goal reached! stopping controller timer");
+
+            controller_timer_.stop();
+        }
+    }
+
+    ROS_INFO("controller: ep=%f, eo=%f, status=%s", ep.data, eo.data, status_str);
 
     twist_pub_.publish(twist);
 }
