@@ -113,6 +113,7 @@ link_directories(
 
 ## Declare a cpp executable
 add_executable(octomap_path_planner_node src/octomap_path_planner_node.cpp)
+add_executable(next_best_view_node src/next_best_view_node.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
@@ -120,6 +121,10 @@ add_executable(octomap_path_planner_node src/octomap_path_planner_node.cpp)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(octomap_path_planner_node
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+)
+target_link_libraries(next_best_view_node
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
 )
