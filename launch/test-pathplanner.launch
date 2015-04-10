@@ -12,8 +12,8 @@
     </node>
     <node pkg="octomap_path_planner" type="move_base_node" name="move_base" output="screen">
         <remap from="navfn_in" to="/ground_cloud_out"/>
-        <remap from="goal_point_in" to="/clicked_point"/>
-        <remap from="goal_pose_in" to="/move_base_simple/goal"/>
+        <remap from="goal_point_in" to="/reprojected_point_goal"/>
+        <remap from="goal_pose_in" to="/reprojected_pose_goal"/>
         <remap from="twist_out" to="/cmd_vel"/>
         <param name="goal_reached_threshold" value="0.25" />
         <param name="controller_frequency" value="2.0" />
