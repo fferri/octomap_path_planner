@@ -1,18 +1,25 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="robot" default="p3dx" />
-    <node pkg="octomap_path_planner" type="octomap_path_planner_node" name="octomap_path_planner" output="screen">
+    <node pkg="octomap_path_planner" type="navigation_function_node" name="navigation_function" output="screen">
         <remap from="octree_in" to="/octomap_binary"/>
         <remap from="goal_point_in" to="/clicked_point"/>
         <remap from="goal_pose_in" to="/move_base_simple/goal"/>
-        <remap from="twist_out" to="/cmd_vel"/>
         <param name="treat_unknown_as_free" type="bool" value="true" />
-        <param name="goal_reached_threshold" value="0.25" />
-        <param name="controller_frequency" value="2.0" />
-        <param name="twist_linear_gain" value="0.5" />
-        <param name="twist_angulear_gain" value="1.0" />
         <param name="max_superable_height" value="0.25" />
         <param name="ground_voxel_connectivity" value="3.5" />
+        <rosparam command="load" file="$(find octomap_path_planner)/launch/vrep-$(arg robot).yaml" />
+    </node>
+    <node pkg="octomap_path_planner" type="move_base_node" name="move_base" output="screen">
+        <remap from="navfn_in" to="/ground_cloud_out"/>
+        <remap from="goal_point_in" to="/clicked_point"/>
+        <remap from="goal_pose_in" to="/move_base_simple/goal"/>
+        <remap from="twist_out" to="/cmd_vel"/>
+        <param name="goal_reached_threshold" value="0.25" />
+        <param name="controller_frequency" value="2.0" />
+        <param name="local_target_radius" value="0.5" />
+        <param name="twist_linear_gain" value="0.5" />
+        <param name="twist_angulear_gain" value="1.0" />
         <rosparam command="load" file="$(find octomap_path_planner)/launch/vrep-$(arg robot).yaml" />
     </node>
     <node pkg="octomap_path_planner" type="next_best_view_node" name="next_best_view" output="screen">

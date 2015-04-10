@@ -9,6 +9,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   octomap_msgs
   octomap_ros
+  pcl_ros
   roscpp
 )
 
@@ -112,7 +113,8 @@ link_directories(
 # )
 
 ## Declare a cpp executable
-add_executable(octomap_path_planner_node src/octomap_path_planner_node.cpp)
+add_executable(navigation_function_node src/navigation_function_node.cpp)
+add_executable(move_base_node src/move_base_node.cpp)
 add_executable(next_best_view_node src/next_best_view_node.cpp)
 
 ## Add cmake target dependencies of the executable/library
@@ -120,7 +122,11 @@ add_executable(next_best_view_node src/next_best_view_node.cpp)
 # add_dependencies(octomap_path_planner_node octomap_path_planner_generate_messages_cpp)
 
 ## Specify libraries to link a library or executable target against
-target_link_libraries(octomap_path_planner_node
+target_link_libraries(navigation_function_node
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+)
+target_link_libraries(move_base_node
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
 )

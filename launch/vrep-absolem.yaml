@@ -1,3 +1,5 @@
 frame_id: /map
 laser_frame_id: /laser
 robot_frame_id: /base_link
+robot_height: 0.5
+robot_radius: 0.46
