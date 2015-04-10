@@ -78,8 +78,9 @@ protected:
     double twist_linear_gain_;
     double twist_angular_gain_;
     double max_superable_height_;
-    void startController();
     bool reached_position_;
+    double ground_voxel_connectivity_;
+    void startController();
 public:
     OctomapPathPlanner();
     ~OctomapPathPlanner();
@@ -119,7 +120,8 @@ OctomapPathPlanner::OctomapPathPlanner()
       twist_linear_gain_(0.5),
       twist_angular_gain_(1.0),
       max_superable_height_(0.2),
-      reached_position_(false)
+      reached_position_(false),
+      ground_voxel_connectivity_(1.8)
 {
     pnh_.param("frame_id", frame_id_, frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
@@ -132,6 +134,7 @@ OctomapPathPlanner::OctomapPathPlanner()
     pnh_.param("twist_linear_gain", twist_linear_gain_, twist_linear_gain_);
     pnh_.param("twist_angular_gain", twist_angular_gain_, twist_angular_gain_);
     pnh_.param("max_superable_height", max_superable_height_, max_superable_height_);
+    pnh_.param("ground_voxel_connectivity", ground_voxel_connectivity_, ground_voxel_connectivity_);
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &OctomapPathPlanner::onOctomap, this);
     goal_point_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("goal_point_in", 1, &OctomapPathPlanner::onGoal, this);
     goal_pose_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_pose_in", 1, &OctomapPathPlanner::onGoal, this);
@@ -466,7 +469,7 @@ void OctomapPathPlanner::computeDistanceTransform()
         // get neighbours:
         std::vector<int> pointIdx;
         std::vector<float> pointDistSq;
-        ground_octree_ptr_->radiusSearch(ground_pcl_[i], 1.8 * res, pointIdx, pointDistSq);
+        ground_octree_ptr_->radiusSearch(ground_pcl_[i], ground_voxel_connectivity_ * res, pointIdx, pointDistSq);
 
         for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); it++)
         {

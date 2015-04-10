@@ -12,6 +12,7 @@
         <param name="twist_linear_gain" value="0.5" />
         <param name="twist_angulear_gain" value="1.0" />
         <param name="max_superable_height" value="0.25" />
+        <param name="ground_voxel_connectivity" value="3.5" />
         <rosparam command="load" file="$(find octomap_path_planner)/launch/vrep-$(arg robot).yaml" />
     </node>
     <node pkg="octomap_path_planner" type="next_best_view_node" name="next_best_view" output="screen">
