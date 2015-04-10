@@ -37,8 +37,6 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
-const int num_clusters = 3;
-
 class NextBestView
 {
 public:
@@ -50,6 +48,7 @@ public:
 protected:
     std::string frame_id_;
     std::string robot_frame_id_;
+    int num_clusters_;
 	int min_computation_interval_;
 	double normal_search_radius_;
 	int min_pts_per_cluster_;
@@ -61,7 +60,7 @@ protected:
     octomap::OcTree *octree_ptr_;
     ros::Time last_computation_time_;
     ros::Publisher posearray_pub_;
-    ros::Publisher cluster_pub_[num_clusters];
+    std::vector<ros::Publisher> cluster_pub_;
     ros::Subscriber octree_sub_;
 };
 
@@ -69,6 +68,7 @@ protected:
 NextBestView::NextBestView() :
 	frame_id_("/map"),
 	robot_frame_id_("/base_link"),
+    num_clusters_(3),
 	min_computation_interval_(5 /*seconds*/),
 	normal_search_radius_(0.4),
 	min_pts_per_cluster_(5),
@@ -80,6 +80,7 @@ NextBestView::NextBestView() :
 {
 	private_node_handle_.param("frame_id", frame_id_, frame_id_);
 	private_node_handle_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
+	private_node_handle_.param("num_clusters", num_clusters_, num_clusters_);
 	private_node_handle_.param("min_computation_interval", min_computation_interval_, min_computation_interval_);
 	private_node_handle_.param("normal_search_radius", normal_search_radius_, normal_search_radius_);
 	private_node_handle_.param("min_pts_per_cluster", min_pts_per_cluster_, min_pts_per_cluster_);
@@ -89,10 +90,10 @@ NextBestView::NextBestView() :
 
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &NextBestView::onOctomap, this);
     posearray_pub_ = nh_.advertise<geometry_msgs::PoseArray>("poses", 1, false);
-    for(int i = 0; i < num_clusters; i++)
+    for(int i = 0; i < num_clusters_; i++)
     {
     	std::stringstream ss; ss << "cluster_pcl_" << (i+1);
-    	cluster_pub_[i] = nh_.advertise<sensor_msgs::PointCloud2> (ss.str(), 1, false);
+    	cluster_pub_.push_back(nh_.advertise<sensor_msgs::PointCloud2> (ss.str(), 1, false));
     }
 }
 
@@ -203,12 +204,12 @@ void NextBestView::computeNextBestViews()
 	if(clusters.size() > 0)
 	{
 		std::sort(clusters.begin(), clusters.end(), compareClusters);
-		pcl::PointCloud<pcl::PointXYZ> cluster_clouds[num_clusters];
+		pcl::PointCloud<pcl::PointXYZ> cluster_clouds[num_clusters_];
 
 		geometry_msgs::PoseArray nbv_pose_array;
 
 		for(unsigned int nc = 0; nc < clusters.size(); nc++) {
-			if(nc == num_clusters)
+			if(nc == num_clusters_)
 				break;
 
 			// extract a cluster:
@@ -265,7 +266,7 @@ void NextBestView::computeNextBestViews()
 		posearray_pub_.publish(nbv_pose_array);
 
 		// visualize cluster pcls:
-		for(int i = 0; i < num_clusters; i++)
+		for(int i = 0; i < num_clusters_; i++)
 		{
 			sensor_msgs::PointCloud2 cluster_pcl_msg;
 			pcl::toROSMsg(cluster_clouds[i], cluster_pcl_msg);
