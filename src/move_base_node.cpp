@@ -95,7 +95,7 @@ public:
     void onNavigationFunctionChange(const sensor_msgs::PointCloud2::ConstPtr& msg);
     void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
     void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
-    void projectGoalPositionToGround();
+    void projectGoalPositionToNavigationFunction();
     bool getRobotPose();
     double positionError();
     double orientationError();
@@ -175,7 +175,7 @@ void MoveBase::onGoal(const geometry_msgs::PointStamped::ConstPtr& msg)
         goal_.pose.orientation.y = 0.0;
         goal_.pose.orientation.z = 0.0;
         goal_.pose.orientation.w = 0.0;
-        projectGoalPositionToGround();
+        projectGoalPositionToNavigationFunction();
         ROS_INFO("goal set to point (%f, %f, %f)",
             goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z);
 
@@ -193,7 +193,7 @@ void MoveBase::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
     try
     {
         tf_listener_.transformPose(frame_id_, *msg, goal_);
-        projectGoalPositionToGround();
+        projectGoalPositionToNavigationFunction();
         ROS_INFO("goal set to pose (%f, %f, %f), (%f, %f, %f, %f)",
                 goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z,
                 goal_.pose.orientation.x, goal_.pose.orientation.y, goal_.pose.orientation.z,
@@ -208,7 +208,7 @@ void MoveBase::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
 }
 
 
-void MoveBase::projectGoalPositionToGround()
+void MoveBase::projectGoalPositionToNavigationFunction()
 {
     pcl::PointXYZI goal;
     goal.x = goal_.pose.position.x;
@@ -218,7 +218,7 @@ void MoveBase::projectGoalPositionToGround()
     std::vector<float> pointDistSq;
     if(navfn_octree_ptr_->nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
     {
-        ROS_ERROR("Failed to project goal position to ground pcl");
+        ROS_ERROR("Failed to project goal position to navfn pcl");
         return;
     }
     int i = pointIdx[0];
