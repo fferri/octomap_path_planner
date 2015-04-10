@@ -73,6 +73,8 @@ protected:
     ros::Subscriber goal_pose_sub_;
     ros::Publisher ground_pub_;
     ros::Publisher obstacles_pub_;
+    ros::Publisher reprojected_point_goal_pub_;
+    ros::Publisher reprojected_pose_goal_pub_;
     tf::TransformListener tf_listener_;    
     geometry_msgs::PoseStamped robot_pose_;
     geometry_msgs::PoseStamped goal_;
@@ -132,6 +134,8 @@ NavigationFunction::NavigationFunction()
     goal_pose_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_pose_in", 1, &NavigationFunction::onGoal, this);
     ground_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("ground_cloud_out", 1, true);
     obstacles_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("obstacles_cloud_out", 1, true);
+    reprojected_point_goal_pub_ = nh_.advertise<geometry_msgs::PointStamped>("reprojected_point_goal", 1, true);
+    reprojected_pose_goal_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("reprojected_pose_goal", 1, true);
     ground_pcl_.header.frame_id = frame_id_;
     obstacles_pcl_.header.frame_id = frame_id_;
 }
@@ -156,9 +160,10 @@ void NavigationFunction::onOctomap(const octomap_msgs::Octomap::ConstPtr& msg)
 
 void NavigationFunction::onGoal(const geometry_msgs::PointStamped::ConstPtr& msg)
 {
+    geometry_msgs::PointStamped msg2;
+
     try
     {
-        geometry_msgs::PointStamped msg2;
         tf_listener_.transformPoint(frame_id_, *msg, msg2);
         goal_.header.stamp = msg2.header.stamp;
         goal_.header.frame_id = msg2.header.frame_id;
@@ -176,9 +181,15 @@ void NavigationFunction::onGoal(const geometry_msgs::PointStamped::ConstPtr& msg
     catch(tf::TransformException& ex)
     {
         ROS_ERROR("Failed to lookup robot position: %s", ex.what());
+        return;
     }
 
     computeDistanceTransform();
+
+    msg2.point.x = goal_.pose.position.x;
+    msg2.point.y = goal_.pose.position.y;
+    msg2.point.z = goal_.pose.position.z;
+    reprojected_point_goal_pub_.publish(msg2);
 }
 
 
@@ -196,9 +207,12 @@ void NavigationFunction::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
     catch(tf::TransformException& ex)
     {
         ROS_ERROR("Failed to lookup robot position: %s", ex.what());
+        return;
     }
 
     computeDistanceTransform();
+
+    reprojected_pose_goal_pub_.publish(goal_);
 }
 
 
