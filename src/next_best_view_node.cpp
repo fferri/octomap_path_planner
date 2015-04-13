@@ -59,6 +59,7 @@ protected:
     ros::NodeHandle private_node_handle_;
     octomap::OcTree *octree_ptr_;
     ros::Time last_computation_time_;
+    ros::Publisher void_frontier_pub_;
     ros::Publisher posearray_pub_;
     std::vector<ros::Publisher> cluster_pub_;
     ros::Subscriber octree_sub_;
@@ -89,11 +90,12 @@ NextBestView::NextBestView() :
     private_node_handle_.param("boundary_angle_threshold", boundary_angle_threshold_, boundary_angle_threshold_);
 
     octree_sub_ = nh_.subscribe<octomap_msgs::Octomap>("octree_in", 1, &NextBestView::onOctomap, this);
+    void_frontier_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("void_frontier", 1, false);
     posearray_pub_ = nh_.advertise<geometry_msgs::PoseArray>("poses", 1, false);
     for(int i = 0; i < num_clusters_; i++)
     {
         std::stringstream ss; ss << "cluster_pcl_" << (i+1);
-        cluster_pub_.push_back(nh_.advertise<sensor_msgs::PointCloud2> (ss.str(), 1, false));
+        cluster_pub_.push_back(nh_.advertise<sensor_msgs::PointCloud2>(ss.str(), 1, false));
     }
 }
 
@@ -166,6 +168,10 @@ void NextBestView::computeNextBestViews()
         border_pcl[i].z = it->z();
         i++;
     }
+
+    sensor_msgs::PointCloud2 void_frontier_msg;
+    pcl::toROSMsg(border_pcl, void_frontier_msg);
+    void_frontier_pub_.publish(void_frontier_msg);
 
     // estimate normals:
     pcl::PointCloud<pcl::Normal> border_normals;
