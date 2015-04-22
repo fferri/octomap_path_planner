@@ -98,6 +98,7 @@ public:
     void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
     void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
     int projectPositionToNavigationFunction(const geometry_msgs::Point& pos);
+    void getNavigationFunctionNeighborhood(const geometry_msgs::Point& pos, pcl::PointCloud<pcl::PointXYZI> neighbors);
     bool projectGoalPositionToNavigationFunction();
     bool getRobotPose();
     double positionError();
@@ -236,6 +237,26 @@ int MoveBase::projectPositionToNavigationFunction(const geometry_msgs::Point& po
 }
 
 
+void MoveBase::getNavigationFunctionNeighborhood(const geometry_msgs::Point& pos, pcl::PointCloud<pcl::PointXYZI> neighbors)
+{
+    pcl::PointXYZI robot_position;
+
+    robot_position.x = pos.x;
+    robot_position.y = pos.y;
+    robot_position.z = pos.z;
+
+    std::vector<int> pointIdx;
+    std::vector<float> pointDistSq;
+
+    navfn_octree_ptr_->radiusSearch(robot_position, local_target_radius_, pointIdx, pointDistSq);
+
+    neighbors.header.frame_id = navfn_.header.frame_id;
+    neighbors.header.stamp = navfn_.header.stamp;
+    for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
+        neighbors.push_back(navfn_[*it]);
+}
+
+
 bool MoveBase::projectGoalPositionToNavigationFunction()
 {
     int goal_index = projectPositionToNavigationFunction(goal_.pose.position);
@@ -312,28 +333,19 @@ double MoveBase::orientationError()
 
 bool MoveBase::generateLocalTarget(geometry_msgs::PointStamped& p_local)
 {
-    int min_index = -1, min_index_straight = -1;
-    float min_value = std::numeric_limits<float>::infinity();
-
-    pcl::PointXYZI robot_position;
-    robot_position.x = robot_pose_.pose.position.x;
-    robot_position.y = robot_pose_.pose.position.y;
-    robot_position.z = robot_pose_.pose.position.z;
-
-    std::vector<int> pointIdx;
-    std::vector<float> pointDistSq;
-    navfn_octree_ptr_->radiusSearch(robot_position, local_target_radius_, pointIdx, pointDistSq);
+    // get navigation function neighborhood centered at robot pos:
     pcl::PointCloud<pcl::PointXYZI> neighbors, neighbors_local;
-    neighbors.header.frame_id = navfn_.header.frame_id;
-    neighbors.header.stamp = navfn_.header.stamp;
-    for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
-        neighbors.push_back(navfn_[*it]);
+    getNavigationFunctionNeighborhood(robot_pose_.pose.position, neighbors);
 
     if(!pcl_ros::transformPointCloud(robot_frame_id_, neighbors, neighbors_local, tf_listener_))
     {
         ROS_ERROR("Failed to transform robot neighborhood");
         return false;
     }
+
+    // find minimum distance point in neighborhood:
+    int min_index = -1, min_index_straight = -1;
+    float min_value = std::numeric_limits<float>::infinity();
 
     for(size_t i = 0; i < neighbors_local.size(); i++)
     {
