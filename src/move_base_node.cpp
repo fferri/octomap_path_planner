@@ -89,6 +89,7 @@ protected:
     double twist_linear_gain_;
     double twist_angular_gain_;
     bool reached_position_;
+    int controller_repeated_failures_;
     void startController();
 public:
     MoveBase();
@@ -117,7 +118,8 @@ MoveBase::MoveBase()
       local_target_radius_(0.4),
       twist_linear_gain_(0.5),
       twist_angular_gain_(1.0),
-      reached_position_(false)
+      reached_position_(false),
+      controller_repeated_failures_(0)
 {
     pnh_.param("frame_id", frame_id_, frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
@@ -158,8 +160,9 @@ void MoveBase::onNavigationFunctionChange(const sensor_msgs::PointCloud2::ConstP
 
 void MoveBase::startController()
 {
-    controller_timer_ = nh_.createTimer(ros::Duration(1.0 / controller_frequency_), &MoveBase::controllerCallback, this);
     reached_position_ = false;
+    controller_repeated_failures_ = 0;
+    controller_timer_ = nh_.createTimer(ros::Duration(1.0 / controller_frequency_), &MoveBase::controllerCallback, this);
 }
 
 
@@ -407,8 +410,16 @@ void MoveBase::generateTwistCommand(const geometry_msgs::PointStamped& local_tar
 
 void MoveBase::controllerCallback(const ros::TimerEvent& event)
 {
+    if(controller_repeated_failures_ >= 5)
+    {
+        ROS_ERROR("controller keeps failing. giving up :-(");
+        controller_timer_.stop();
+        return;
+    }
+
     if(!getRobotPose())
     {
+        controller_repeated_failures_++;
         ROS_ERROR("controllerCallback: failed to get robot pose");
         return;
     }
@@ -444,6 +455,7 @@ void MoveBase::controllerCallback(const ros::TimerEvent& event)
 
         if(!generateLocalTarget(local_target))
         {
+            controller_repeated_failures_++;
             ROS_ERROR("controllerCallback: failed to generate a local target to follow");
             return;
         }
@@ -477,6 +489,8 @@ void MoveBase::controllerCallback(const ros::TimerEvent& event)
     ROS_INFO("controller: ep=%f, eo=%f, status=%s", ep.data, eo.data, status_str);
 
     twist_pub_.publish(twist);
+
+    controller_repeated_failures_ = 0;
 }
 
 
