@@ -87,7 +87,6 @@ protected:
     double local_target_radius_;
     double twist_linear_gain_;
     double twist_angular_gain_;
-    double oscillation_suppression_bias_;
     bool reached_position_;
     void startController();
 public:
@@ -100,8 +99,6 @@ public:
     bool getRobotPose();
     double positionError();
     double orientationError();
-    double targetBias(const pcl::PointXYZI& robot_position, const pcl::PointXYZI& p);
-    int generateTarget();
     bool generateLocalTarget(geometry_msgs::PointStamped& p_local);
     void generateTwistCommand(const geometry_msgs::PointStamped& local_target, geometry_msgs::Twist& twist);
     void controllerCallback(const ros::TimerEvent& event);
@@ -117,7 +114,6 @@ MoveBase::MoveBase()
       local_target_radius_(0.4),
       twist_linear_gain_(0.5),
       twist_angular_gain_(1.0),
-      oscillation_suppression_bias_(2.0),
       reached_position_(false)
 {
     pnh_.param("frame_id", frame_id_, frame_id_);
@@ -127,7 +123,6 @@ MoveBase::MoveBase()
     pnh_.param("local_target_radius", local_target_radius_, local_target_radius_);
     pnh_.param("twist_linear_gain", twist_linear_gain_, twist_linear_gain_);
     pnh_.param("twist_angular_gain", twist_angular_gain_, twist_angular_gain_);
-    pnh_.param("oscillation_suppression_bias", oscillation_suppression_bias_, oscillation_suppression_bias_);
     navfn_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>("navfn_in", 1, &MoveBase::onNavigationFunctionChange, this);
     goal_point_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("goal_point_in", 1, &MoveBase::onGoal, this);
     goal_pose_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_pose_in", 1, &MoveBase::onGoal, this);
@@ -286,21 +281,10 @@ double MoveBase::orientationError()
 }
 
 
-double MoveBase::targetBias(const pcl::PointXYZI& robot_position, const pcl::PointXYZI& p)
+bool MoveBase::generateLocalTarget(geometry_msgs::PointStamped& p_local)
 {
-    // for suppressing oscillations
-
-    double x = p.x - robot_position.x;
-    double y = p.y - robot_position.y;
-
-    return (x > 0) * x * x + y * y;
-}
-
-
-int MoveBase::generateTarget()
-{
-    int best_index = -1;
-    float best_value = std::numeric_limits<float>::infinity();
+    int min_index = -1, min_index_straight = -1;
+    float min_value = std::numeric_limits<float>::infinity();
 
     pcl::PointXYZI robot_position;
     robot_position.x = robot_pose_.pose.position.x;
@@ -310,49 +294,44 @@ int MoveBase::generateTarget()
     std::vector<int> pointIdx;
     std::vector<float> pointDistSq;
     navfn_octree_ptr_->radiusSearch(robot_position, local_target_radius_, pointIdx, pointDistSq);
-
+    pcl::PointCloud<pcl::PointXYZI> neighbors, neighbors_local;
+    neighbors.header.frame_id = navfn_.header.frame_id;
+    neighbors.header.stamp = navfn_.header.stamp;
     for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
-    {
-        pcl::PointXYZI& p = navfn_[*it];
-        double value = p.intensity + oscillation_suppression_bias_ * targetBias(robot_position, p);
+        neighbors.push_back(navfn_[*it]);
 
-        if(best_index == -1 || value < best_value)
+    if(!pcl_ros::transformPointCloud(robot_frame_id_, neighbors, neighbors_local, tf_listener_))
+    {
+        ROS_ERROR("Failed to transform robot neighborhood");
+        return false;
+    }
+
+    for(size_t i = 0; i < neighbors_local.size(); i++)
+    {
+        pcl::PointXYZI& p = neighbors_local[i];
+
+        if(p.intensity < min_value)
         {
-            best_value = value;
-            best_index = *it;
+            min_value = p.intensity;
+            min_index = i;
         }
     }
 
-    return best_index;
-}
-
-
-bool MoveBase::generateLocalTarget(geometry_msgs::PointStamped& p_local)
-{
-    int i = generateTarget();
-
-    if(i == -1)
+    if(min_index == -1)
     {
         ROS_ERROR("Failed to find a target in robot vicinity");
         return false;
     }
 
-    try
-    {
-        geometry_msgs::PointStamped p;
-        p.header.frame_id = navfn_.header.frame_id;
-        p.point.x = navfn_[i].x;
-        p.point.y = navfn_[i].y;
-        p.point.z = navfn_[i].z;
-        tf_listener_.transformPoint(robot_frame_id_, p, p_local);
-        target_pub_.publish(p);
-        return true;
-    }
-    catch(tf::TransformException& ex)
-    {
-        ROS_ERROR("Failed to transform reference point: %s", ex.what());
-        return false;
-    }
+    p_local.header.stamp = ros::Time::now();
+    p_local.header.frame_id = neighbors_local.header.frame_id;
+    p_local.point.x = neighbors_local[min_index].x;
+    p_local.point.y = neighbors_local[min_index].y;
+    p_local.point.z = neighbors_local[min_index].z;
+
+    target_pub_.publish(p_local);
+
+    return true;
 }
 
 
