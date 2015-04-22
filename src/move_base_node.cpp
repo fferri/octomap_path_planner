@@ -225,7 +225,7 @@ int MoveBase::projectPositionToNavigationFunction(const geometry_msgs::Point& po
     p.z = pos.z;
     std::vector<int> pointIdx;
     std::vector<float> pointDistSq;
-    if(navfn_octree_ptr_->nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
+    if(navfn_octree_ptr_->nearestKSearch(p, 1, pointIdx, pointDistSq) < 1)
     {
         return -1;
     }
@@ -351,7 +351,7 @@ bool MoveBase::generateLocalTarget(geometry_msgs::PointStamped& p_local)
 
     // check if we are actually improving the value in the navigation function
     int rob_index = projectPositionToNavigationFunction(robot_pose_.pose.position);
-    double delta = navfn_[rob_index] - min_value;
+    double delta = navfn_[rob_index].intensity - min_value;
     if(delta < 1e-6)
     {
         ROS_ERROR("Failed to generate a target: gradient is null");
