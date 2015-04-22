@@ -210,7 +210,8 @@ void NextBestView::computeNextBestViews()
     if(clusters.size() > 0)
     {
         std::sort(clusters.begin(), clusters.end(), compareClusters);
-        pcl::PointCloud<pcl::PointXYZ> cluster_clouds[num_clusters_];
+        std::vector<pcl::PointCloud<pcl::PointXYZ> > cluster_clouds;
+        cluster_clouds.reserve(num_clusters_);
 
         geometry_msgs::PoseArray nbv_pose_array;
 
@@ -260,7 +261,7 @@ void NextBestView::computeNextBestViews()
                 }
             }
 
-            cluster_clouds[nc] = cluster_pcl;
+            cluster_clouds.push_back(cluster_pcl);
 
             // pop the just used cluster from indices:
             clusters.pop_back();
