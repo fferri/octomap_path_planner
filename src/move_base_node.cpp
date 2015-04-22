@@ -349,6 +349,15 @@ bool MoveBase::generateLocalTarget(geometry_msgs::PointStamped& p_local)
         return false;
     }
 
+    // check if we are actually improving the value in the navigation function
+    int rob_index = projectPositionToNavigationFunction(robot_pose_.pose.position);
+    double delta = navfn_[rob_index] - min_value;
+    if(delta < 1e-6)
+    {
+        ROS_ERROR("Failed to generate a target: gradient is null");
+        return false;
+    }
+
     p_local.header.stamp = ros::Time::now();
     p_local.header.frame_id = neighbors_local.header.frame_id;
     p_local.point.x = neighbors_local[min_index].x;
