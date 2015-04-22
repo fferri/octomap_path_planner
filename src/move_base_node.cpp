@@ -44,23 +44,23 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
-namespace pcl
-{
-    template<typename PointA, typename PointB>
-    double sqdist(const PointA& a, const PointB& b)
-    {
-        double dx = a.x - b.x;
-        double dy = a.y - b.y;
-        double dz = a.z - b.z;
-        return dx * dx + dy * dy + dz * dz;
-    }
 
-    template<typename PointA, typename PointB>
-    double dist(const PointA& a, const PointB& b)
-    {
-        return sqrt(sqdist(a, b));
-    }
+template<typename PointA, typename PointB>
+double sqdist(const PointA& a, const PointB& b)
+{
+    double dx = a.x - b.x;
+    double dy = a.y - b.y;
+    double dz = a.z - b.z;
+    return dx * dx + dy * dy + dz * dz;
 }
+
+
+template<typename PointA, typename PointB>
+double dist(const PointA& a, const PointB& b)
+{
+    return sqrt(sqdist(a, b));
+}
+
 
 class MoveBase
 {
@@ -95,6 +95,7 @@ public:
     void onNavigationFunctionChange(const sensor_msgs::PointCloud2::ConstPtr& msg);
     void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
     void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
+    int projectPositionToNavigationFunction(const geometry_msgs::Point& pos);
     void projectGoalPositionToNavigationFunction();
     bool getRobotPose();
     double positionError();
@@ -207,23 +208,33 @@ void MoveBase::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
 }
 
 
-void MoveBase::projectGoalPositionToNavigationFunction()
+int MoveBase::projectPositionToNavigationFunction(const geometry_msgs::Point& pos)
 {
-    pcl::PointXYZI goal;
-    goal.x = goal_.pose.position.x;
-    goal.y = goal_.pose.position.y;
-    goal.z = goal_.pose.position.z;
+    pcl::PointXYZI p;
+    p.x = pos.x;
+    p.y = pos.y;
+    p.z = pos.z;
     std::vector<int> pointIdx;
     std::vector<float> pointDistSq;
     if(navfn_octree_ptr_->nearestKSearch(goal, 1, pointIdx, pointDistSq) < 1)
     {
+        return -1;
+    }
+    return pointIdx[0];
+}
+
+
+void MoveBase::projectGoalPositionToNavigationFunction()
+{
+    int goal_index = projectPositionToNavigationFunction(goal_.pose.position);
+    if(goal_index == -1)
+    {
         ROS_ERROR("Failed to project goal position to navfn pcl");
         return;
     }
-    int i = pointIdx[0];
-    goal_.pose.position.x = navfn_[i].x;
-    goal_.pose.position.y = navfn_[i].y;
-    goal_.pose.position.z = navfn_[i].z;
+    goal_.pose.position.x = navfn_[goal_index].x;
+    goal_.pose.position.y = navfn_[goal_index].y;
+    goal_.pose.position.z = navfn_[goal_index].z;
 }
 
 
