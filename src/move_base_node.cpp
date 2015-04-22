@@ -87,6 +87,7 @@ protected:
     double local_target_radius_;
     double twist_linear_gain_;
     double twist_angular_gain_;
+    double oscillation_suppression_bias_;
     bool reached_position_;
     void startController();
 public:
@@ -99,6 +100,7 @@ public:
     bool getRobotPose();
     double positionError();
     double orientationError();
+    double targetBias(const pcl::PointXYZI& robot_position, const pcl::PointXYZI& p);
     int generateTarget();
     bool generateLocalTarget(geometry_msgs::PointStamped& p_local);
     void generateTwistCommand(const geometry_msgs::PointStamped& local_target, geometry_msgs::Twist& twist);
@@ -115,6 +117,7 @@ MoveBase::MoveBase()
       local_target_radius_(0.4),
       twist_linear_gain_(0.5),
       twist_angular_gain_(1.0),
+      oscillation_suppression_bias_(2.0),
       reached_position_(false)
 {
     pnh_.param("frame_id", frame_id_, frame_id_);
@@ -124,6 +127,7 @@ MoveBase::MoveBase()
     pnh_.param("local_target_radius", local_target_radius_, local_target_radius_);
     pnh_.param("twist_linear_gain", twist_linear_gain_, twist_linear_gain_);
     pnh_.param("twist_angular_gain", twist_angular_gain_, twist_angular_gain_);
+    pnh_.param("oscillation_suppression_bias", oscillation_suppression_bias_, oscillation_suppression_bias_);
     navfn_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>("navfn_in", 1, &MoveBase::onNavigationFunctionChange, this);
     goal_point_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("goal_point_in", 1, &MoveBase::onGoal, this);
     goal_pose_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("goal_pose_in", 1, &MoveBase::onGoal, this);
@@ -282,6 +286,17 @@ double MoveBase::orientationError()
 }
 
 
+double MoveBase::targetBias(const pcl::PointXYZI& robot_position, const pcl::PointXYZI& p)
+{
+    // for suppressing oscillations
+
+    double x = p.x - robot_position.x;
+    double y = p.y - robot_position.y;
+
+    return (x > 0) * x * x + y * y;
+}
+
+
 int MoveBase::generateTarget()
 {
     int best_index = -1;
@@ -299,10 +314,11 @@ int MoveBase::generateTarget()
     for(std::vector<int>::iterator it = pointIdx.begin(); it != pointIdx.end(); ++it)
     {
         pcl::PointXYZI& p = navfn_[*it];
+        double value = p.intensity + oscillation_suppression_bias_ * targetBias(robot_position, p);
 
-        if(best_index == -1 || p.intensity < best_value)
+        if(best_index == -1 || value < best_value)
         {
-            best_value = p.intensity;
+            best_value = value;
             best_index = *it;
         }
     }
