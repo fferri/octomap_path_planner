@@ -82,6 +82,7 @@ protected:
     pcl::PointCloud<pcl::PointXYZI> navfn_;
     pcl::octree::OctreePointCloudSearch<pcl::PointXYZI>::Ptr navfn_octree_ptr_;
     ros::Timer controller_timer_;
+    double robot_radius_;
     double goal_reached_threshold_;
     double controller_frequency_;
     double local_target_radius_;
@@ -96,7 +97,7 @@ public:
     void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
     void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
     int projectPositionToNavigationFunction(const geometry_msgs::Point& pos);
-    void projectGoalPositionToNavigationFunction();
+    bool projectGoalPositionToNavigationFunction();
     bool getRobotPose();
     double positionError();
     double orientationError();
@@ -110,7 +111,8 @@ MoveBase::MoveBase()
     : pnh_("~"),
       frame_id_("/map"),
       robot_frame_id_("/base_link"),
-      goal_reached_threshold_(0.2),
+      robot_radius_(0.2),
+      goal_reached_threshold_(0.5),
       controller_frequency_(2.0),
       local_target_radius_(0.4),
       twist_linear_gain_(0.5),
@@ -119,6 +121,7 @@ MoveBase::MoveBase()
 {
     pnh_.param("frame_id", frame_id_, frame_id_);
     pnh_.param("robot_frame_id", robot_frame_id_, robot_frame_id_);
+    pnh_.param("robot_radius", robot_radius_, robot_radius_);
     pnh_.param("goal_reached_threshold", goal_reached_threshold_, goal_reached_threshold_);
     pnh_.param("controller_frequency", controller_frequency_, controller_frequency_);
     pnh_.param("local_target_radius", local_target_radius_, local_target_radius_);
@@ -175,11 +178,14 @@ void MoveBase::onGoal(const geometry_msgs::PointStamped::ConstPtr& msg)
         goal_.pose.orientation.y = 0.0;
         goal_.pose.orientation.z = 0.0;
         goal_.pose.orientation.w = 0.0;
-        projectGoalPositionToNavigationFunction();
-        ROS_INFO("goal set to point (%f, %f, %f)",
-            goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z);
 
-        startController();
+        if(projectGoalPositionToNavigationFunction())
+        {
+            ROS_INFO("goal set to point (%f, %f, %f)",
+                goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z);
+
+            startController();
+        }
     }
     catch(tf::TransformException& ex)
     {
@@ -193,13 +199,16 @@ void MoveBase::onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg)
     try
     {
         tf_listener_.transformPose(frame_id_, *msg, goal_);
-        projectGoalPositionToNavigationFunction();
-        ROS_INFO("goal set to pose (%f, %f, %f), (%f, %f, %f, %f)",
-                goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z,
-                goal_.pose.orientation.x, goal_.pose.orientation.y, goal_.pose.orientation.z,
-                goal_.pose.orientation.w);
+        
+        if(projectGoalPositionToNavigationFunction())
+        {
+            ROS_INFO("goal set to pose (%f, %f, %f), (%f, %f, %f, %f)",
+                    goal_.pose.position.x, goal_.pose.position.y, goal_.pose.position.z,
+                    goal_.pose.orientation.x, goal_.pose.orientation.y, goal_.pose.orientation.z,
+                    goal_.pose.orientation.w);
 
-        startController();
+            startController();
+        }
     }
     catch(tf::TransformException& ex)
     {
@@ -224,17 +233,23 @@ int MoveBase::projectPositionToNavigationFunction(const geometry_msgs::Point& po
 }
 
 
-void MoveBase::projectGoalPositionToNavigationFunction()
+bool MoveBase::projectGoalPositionToNavigationFunction()
 {
     int goal_index = projectPositionToNavigationFunction(goal_.pose.position);
     if(goal_index == -1)
     {
         ROS_ERROR("Failed to project goal position to navfn pcl");
-        return;
+        return false;
+    }
+    if(dist(goal_.pose.position, navfn_[goal_index]) > robot_radius_)
+    {
+        ROS_ERROR("Failed to project goal position to navfn pcl (point is too far from ground)");
+        return false;
     }
     goal_.pose.position.x = navfn_[goal_index].x;
     goal_.pose.position.y = navfn_[goal_index].y;
     goal_.pose.position.z = navfn_[goal_index].z;
+    return true;
 }
 
 
