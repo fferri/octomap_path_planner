@@ -32,3 +32,5 @@
 
 # catkin tools
 .catkin_tools
+
+/build
