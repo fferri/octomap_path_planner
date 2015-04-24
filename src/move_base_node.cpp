@@ -98,7 +98,7 @@ public:
     void onGoal(const geometry_msgs::PointStamped::ConstPtr& msg);
     void onGoal(const geometry_msgs::PoseStamped::ConstPtr& msg);
     int projectPositionToNavigationFunction(const geometry_msgs::Point& pos);
-    void getNavigationFunctionNeighborhood(const geometry_msgs::Point& pos, pcl::PointCloud<pcl::PointXYZI> neighbors);
+    void getNavigationFunctionNeighborhood(const geometry_msgs::Point& pos, pcl::PointCloud<pcl::PointXYZI>& neighbors);
     bool projectGoalPositionToNavigationFunction();
     bool getRobotPose();
     double positionError();
@@ -237,7 +237,7 @@ int MoveBase::projectPositionToNavigationFunction(const geometry_msgs::Point& po
 }
 
 
-void MoveBase::getNavigationFunctionNeighborhood(const geometry_msgs::Point& pos, pcl::PointCloud<pcl::PointXYZI> neighbors)
+void MoveBase::getNavigationFunctionNeighborhood(const geometry_msgs::Point& pos, pcl::PointCloud<pcl::PointXYZI>& neighbors)
 {
     pcl::PointXYZI robot_position;
 
